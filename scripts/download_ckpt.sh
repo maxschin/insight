@@ -1,4 +1,5 @@
 cd cleanrl/sam_track
+mkdir ckpt
 
 # download aot-ckpt 
 gdown --id '1g4E-F0RPOx9Nd6J7tU9AE1TjsouL4oZq' --output ./ckpt/SwinB_DeAOTL_PRE_YTB_DAV.pth
