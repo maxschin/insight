@@ -5,6 +5,7 @@ cleanrl/wandb
 cleanrl/ppoeql_stack_cnn_out_frames/
 cleanrl/models/
 cleanrl/runs/
+cleanrl/stack_cnn_out_frames/
 #!cleanrl/sam_track/benchmark_data
 #!cleanrl/sam_track/benchmark_fsam.qmd
 
