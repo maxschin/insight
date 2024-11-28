@@ -1,0 +1,174 @@
+---
+title: "Benchmarking FastSAM using OCAtari"
+format:
+  html:
+    code-fold: true
+jupyter: python3
+---
+
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import json
+from typing import Tuple
+import re
+from matplotlib.patches import Rectangle
+
+```
+```{python}
+ocatari_video_resolution = [160, 210] # Make sure this resolution is correct 
+
+def normalize_coordinate(coordinate, resolution):
+    return tuple([coordinate[0] / resolution[0], coordinate[1] / resolution[1]])
+
+```
+
+```{python}
+def load_data(ocatari_labels_path, fsam_labels_path):
+  ocatari_labels = pd.read_csv(ocatari_labels_path)
+  ocatari_labels = ocatari_labels['VIS']
+
+  with open(fsam_labels_path, 'r') as file:
+    fsam_labels = json.load(file)
+
+  if len(ocatari_labels) != len(fsam_labels):
+    print('WARNING: number of labels differ between OCAtari and FastSAM')
+  
+  return ocatari_labels, fsam_labels
+```
+```{python}
+def get_ocatari_bounding_boxes(frame_data):
+  # Regular expression to find tuples of integers
+  pattern = r"\(\d+,\s*\d+\)"  # Matches tuples like (x, y)
+  
+  # Find all matching tuples in the text
+  matches = re.findall(pattern, frame_data)
+  
+  # Convert to a list of integer tuples
+  tuples = [tuple(map(int, match.strip("()").split(","))) for match in matches]
+
+  # Normalize each tuple
+  tuples = [normalize_coordinate(t, ocatari_video_resolution) for t in tuples]
+  
+  # Group tuples into pairs (bounding boxes)
+  #bounding_boxes = [(tuples[i], tuples[i+1]) for i in range(0, len(tuples), 2)]
+  bounding_boxes = []
+  for i in range(0, len(tuples), 2):
+    top_left = tuples[i]  # (x, y)
+    width_height = tuples[i+1]  # (width, height)
+    
+    # Convert to ((x1, y1), (x2, y2))
+    bottom_right = (top_left[0] + width_height[0], top_left[1] + width_height[1])
+    bounding_boxes.append((top_left, bottom_right))
+
+  return bounding_boxes
+
+test_text = "[Ball at (76, 117), (2, 4), Enemy at (16, 117), (4, 16), EnemyScore at (36, 1), (12, 20), Player at (140, 34), (4, 8), PlayerScore at (116, 1), (12, 20)]"
+test_bounding_boxes = get_ocatari_bounding_boxes(test_text)
+print(test_bounding_boxes)
+print(type(test_bounding_boxes))
+print(type(test_bounding_boxes[0]))
+print(type(test_bounding_boxes[0][0]))
+```
+
+```{python}
+def get_fsam_bounding_boxes(frame_data):
+  bounding_boxes = []
+  for key, value in frame_data.items():
+    if 'bounding_box' in value:
+      # Convert the bounding box list to a tuple of tuples
+      box = tuple((value['bounding_box'][i], value['bounding_box'][i+1]) for i in range(0, len(value['bounding_box']), 2))
+      bounding_boxes.append(box)
+  return bounding_boxes
+  #return [item['bounding_box'] for item in frame_data.values()]
+
+```
+```{python}
+'''
+Quick mental aid: 
+bounding_box[0=coordinate in the top left; 1=coordinate in the bottom right][0=x component of that coordinate, 1=y compononent]
+'''
+def compute_iou(bounding_box1, bounding_box2):
+
+  inter_x1 = max(bounding_box1[0][0], bounding_box2[0][0])
+  inter_y1 = max(bounding_box1[0][1], bounding_box2[0][1])
+  inter_x2 = min(bounding_box1[1][0], bounding_box2[1][0])
+  inter_y2 = min(bounding_box1[1][1], bounding_box2[1][1])
+
+  # Compute the area of intersection
+  inter_width = max(0, inter_x2 - inter_x1)  # Width of intersection rectangle
+  inter_height = max(0, inter_y2 - inter_y1)  # Height of intersection rectangle
+  inter_area = inter_width * inter_height
+
+  # Compute the area of the two bounding boxes
+  bb1_area = (bounding_box1[1][0] - bounding_box1[0][0]) * (bounding_box1[1][1] - bounding_box1[0][1])
+  bb2_area = (bounding_box2[1][0] - bounding_box2[0][0]) * (bounding_box2[1][1] - bounding_box2[0][1])
+
+  # Compute the union area
+  union_area = bb1_area + bb2_area - inter_area
+
+  '''
+  plt.scatter([bounding_box1[0][0], bounding_box1[1][0]],[bounding_box1[0][1], bounding_box1[1][1]], color='red',alpha=0.2)
+  plt.scatter([bounding_box2[0][0], bounding_box2[1][0]],[bounding_box2[0][1], bounding_box2[1][1]], color='blue',alpha=0.2)
+  plt.scatter([inter_x1, inter_x2],[inter_y1, inter_y2], color='green', alpha=0.2, marker='x')
+  plt.xlim(0,1)
+  plt.ylim(0,1)
+  # Invert the y-axis to make y=0 at the top
+  plt.gca().invert_yaxis()
+  plt.title(str(inter_area) + " " + str(union_area))
+  plt.show()
+  '''
+
+  # Return IoU, avoid division by zero
+  if union_area == 0:
+      return 0
+  return inter_area / union_area
+```
+
+```{python}
+def benchmark(ocatari_labels, fsam_labels, num_frames = 99999):
+  results = pd.DataFrame({
+    'iou': []
+  })
+
+  for frame_id in range(min(len(ocatari_labels),len(fsam_labels),num_frames)):
+    #print(frame_id)
+    oca_bb = get_ocatari_bounding_boxes(ocatari_labels[frame_id])
+    fsam_bb = get_fsam_bounding_boxes(fsam_labels[frame_id])
+    #print(oca_bb)
+    #print(fsam_bb)
+    #print("-"*20)
+    image_iou = []
+    for oca_box in oca_bb:
+      max_iou = 0
+      for fsam_box in fsam_bb:
+        iou = compute_iou(oca_box, fsam_box)
+        max_iou = max(iou, max_iou)
+      image_iou.append(max_iou)
+    results.loc[frame_id] = [image_iou]
+
+  return results
+```
+```{python}
+ocatari_pong_labels, fsam_pong_labels = load_data("benchmark_data/ocatari_labels_Pong_dqn.csv", 'benchmark_data/fsam_labels_pong_train.json')
+
+results = benchmark(ocatari_pong_labels, fsam_pong_labels, num_frames=4000)
+print(results)
+results.to_csv('benchmark_results.csv')
+```
+
+```{python}
+
+# Create a scatter plot
+for idx, iou_list in results['iou'].items():
+    plt.scatter([idx] * len(iou_list), iou_list, alpha=0.7, label=f"Frame {idx}" if idx < 1 else "")
+
+plt.xlabel("Frame Index")
+plt.ylabel("IoU Values")
+plt.title("IoU Values Over Time")
+plt.show()
+```
+
+
+

@@ -1,3 +1,10 @@
-cleanrl/__pycache__
-cleanrl/agents/__pycache__
+cleanrl/__pycache__/
+cleanrl/agents/__pycache__/
+cleanrl/agents/eql/__pycache__/
 cleanrl/wandb
+cleanrl/ppoeql_stack_cnn_out_frames/
+cleanrl/models/
+cleanrl/runs/
+#!cleanrl/sam_track/benchmark_data
+#!cleanrl/sam_track/benchmark_fsam.qmd
+
