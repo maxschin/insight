@@ -12,7 +12,7 @@ from . import Normal_Cnn
 
 # eql
 from .eql import functions
-from .eql.symbolic_network import SymbolicNet
+from .eql.symbolic_network import SymbolicNet, SymbolicNetSimplified
 
 import copy
 
@@ -28,7 +28,7 @@ class Agent(nn.Module):
         self.args = args
         self.activation_funcs = [
             *[functions.Pow(2)] * 2 * args.n_funcs,
-            *[functions.Pow(3)] * 2 * args.n_funcs,
+            *[functions.Pow(3)] * 2 *args.n_funcs,
             *[functions.Constant()] * 2 * args.n_funcs,
             *[functions.Identity()] * 2 * args.n_funcs,
             *[functions.Product()] * 2 * args.n_funcs,
@@ -93,6 +93,21 @@ class Agent(nn.Module):
         if action is None:
             action = probs_nn.sample()
         return action, probs_nn.log_prob(action), probs_nn.entropy(), self.nnagent.critic(hidden),logits_nn,probs_nn.probs
+
+class AgentSimplified(Agent):
+    def __init__(self, envs, args,nnagent=None):
+        super().__init__(envs, args, nnagent)
+        self.activation_funcs = [
+            functions.Pow(2),
+            functions.Pow(3),
+            functions.Identity(),
+            functions.Product()
+        ]
+        # extend init
+        self.eql_actor = SymbolicNetSimplified(
+            funcs=self.activation_funcs,
+            in_dim=args.cnn_out_dim,
+            out_dim=envs.single_action_space.n)
 
 class AgentContinues(nn.Module):
     def __init__(self, envs, args,nnagent=None):

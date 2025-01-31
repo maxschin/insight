@@ -2,7 +2,10 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn.modules import activation
 from . import functions
+from .functions import separate_single_double_funcs
+import sympy as sp
 
 
 class SymbolicLayer(nn.Module):
@@ -87,6 +90,109 @@ class SymbolicNet(nn.Module):
         """Return list of weight matrices as tensors"""
         return [i for i in self.parameters()]
 
+class SymbolicNetSimplified(nn.Module):
+    """Simplified SymbolicNet with one layer"""
+    def __init__(self, funcs, in_dim, out_dim, use_bias=True):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+
+        self.single_funcs, self.double_funcs = separate_single_double_funcs(funcs)
+        self.single_funcs_sympy, self.double_funcs_sympy = separate_single_double_funcs(funcs, return_func_type="sp")
+
+        self.use_bias = use_bias
+        
+        # calculate input dims to linear layer
+        linear_in_dim = 0
+        if use_bias:
+            linear_in_dim += 1
+        # add single
+        linear_in_dim += len(self.single_funcs) * in_dim
+        # add double as cross-prod
+        linear_in_dim += len(self.double_funcs) * in_dim ** 2
+        
+        self.linear = nn.Linear(linear_in_dim, out_dim)
+
+
+    def forward(self, x):
+        # Input tensor shape: (batch_size, in_dim)
+        batch_size = x.size(0)
+
+        # Start building the input to the linear layer
+        linear_input = []
+
+        # Step 1: Add bias (if enabled)
+        if self.use_bias:
+            # Add a column of ones for the bias
+            linear_input.append(torch.ones((batch_size, 1), device=x.device))
+
+        # Step 2: Apply single-input activation functions
+        for func in self.single_funcs:
+            linear_input.append(func(x))  # Apply func element-wise to x
+
+        # Step 3: Apply double-input activation functions
+        if len(self.double_funcs) > 0:
+            # Compute pairwise combinations for double-input functions
+            x_i = x.unsqueeze(2)  # Shape: (batch_size, in_dim, 1)
+            x_j = x.unsqueeze(1)  # Shape: (batch_size, 1, in_dim)
+
+            for func in self.double_funcs:
+                pairwise_results = func(x_i, x_j)
+                linear_input.append(pairwise_results.view(batch_size, -1))
+
+        # Step 4: Concatenate all parts of the input
+        linear_input = torch.cat(linear_input, dim=1)  # Final shape: (batch_size, linear_in_dim)
+
+        # Step 5: Pass through the linear layer
+        output = self.linear(linear_input)  # Shape: (batch_size, out_dim)
+
+        return output
+
+    def get_weights(self):
+        """Return list of weight matrices"""
+        # First part is iterating over hidden weights. Then append the output weight.
+        return [i.cpu().detach().numpy() for i in self.get_weights_tensor()]
+
+    def get_weights_tensor(self):
+        """Return list of weight matrices as tensors"""
+        return [i for i in self.parameters()]
+
+    def pretty_print(self, variable_names):
+        """Print the symbolic computation as equations using SymPy."""
+        
+        assert len(variable_names) == self.in_dim, "Variable names must match input dimension"
+        
+        symbols = sp.symbols(variable_names)
+        expr_list = []
+
+        # Collect terms for the linear input
+        linear_input = []
+        
+        if self.use_bias:
+            linear_input.append(1)  # Bias term
+        
+        # Single functions
+        breakpoint()
+        for func in self.single_funcs_sympy:
+            linear_input.extend([func(var) for var in symbols])
+        
+        # Double functions
+        for func in self.double_funcs_sympy:
+            for i in range(self.in_dim):
+                for j in range(self.in_dim):
+                    linear_input.append(func(symbols[i], symbols[j]))
+        
+        # Convert to SymPy expressions
+        weights = self.get_weights_tensor()[0].detach().cpu().numpy()
+        for out_idx in range(self.out_dim):
+            equation = sum(w * term for w, term in zip(weights[out_idx], linear_input))
+            expr = sp.simplify(equation)
+            expr_list.append(expr)
+
+            # Print equations
+            if out_idx == 0:
+                print(f"Output {out_idx +1}: {expr}")
+        
 
 class SymbolicLayerL0(SymbolicLayer):
     def __init__(self, in_dim=None, funcs=None, initial_weight=None, init_stddev=0.1,

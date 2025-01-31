@@ -245,6 +245,28 @@ def count_double(funcs):
             i += 1
     return i
 
+def separate_single_double_funcs(funcs, return_func_type="torch"):
+    """
+    Separates activation functions into single and double types.
+
+    Args:
+        funcs (list): List of activation function objects.
+
+    Returns:
+        tuple: (single_funcs, double_funcs)
+            - single_funcs: List of single-input activation functions.
+            - double_funcs: List of double-input activation functions.
+    """
+    single_funcs = []
+    double_funcs = []
+
+    for func in funcs:
+        if isinstance(func, BaseFunction2):
+            double_funcs.append(getattr(func, return_func_type))
+        else:
+            single_funcs.append(getattr(func, return_func_type))
+
+    return single_funcs, double_funcs
 
 # default_func = [
 #     Constant(),
