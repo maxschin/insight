@@ -8,5 +8,5 @@ cleanrl/runs/
 cleanrl/stack_cnn_out_frames/
 #!cleanrl/sam_track/benchmark_data
 #!cleanrl/sam_track/benchmark_fsam.qmd
-claenrl/sam_track/assets/*.mp4
+cleanrl/sam_track/assets/*.mp4
 .gitignore

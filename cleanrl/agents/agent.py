@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
@@ -14,6 +15,8 @@ from .eql import functions
 from .eql.symbolic_network import SymbolicNet
 
 import copy
+
+from transform_data import __batch_arrange_data_cnn
 
 class Agent(nn.Module):
     def __init__(self, envs, args,nnagent=None):
@@ -57,13 +60,27 @@ class Agent(nn.Module):
         hidden = self.network.encoder(x / 255.0)
         return self.critic(hidden)
 
-    def get_action_and_value(self, x, action=None, threshold=0.8, actor="neural"):
+    def get_action_and_value(self, x, action=None, threshold=0.8, actor="neural", env_objects_v=None):
         hidden = self.network.encoder(x / 255.0)
         if actor == "neural":
             logits = self.neural_actor(hidden) 
-        else:
+        elif env_objects_v == None:
             coordinates = self.network(x / 255.0, threshold=threshold)
+            #print("CNN Coordinates: ", coordinates)
+            #c_df = pd.DataFrame(coordinates.cpu().detach().numpy())
+            #c_df.to_csv('coords.csv', index=False)
             logits = self.eql_actor(coordinates) * self.eql_inv_temperature
+        else:
+            # Using ocatari object data instead of CNN coordinates for eql actor
+            # This is very much work in progress
+            print('*'*100)
+            print(env_objects_v)
+            oca = pd.DataFrame(env_objects_v.cpu().detach().numpy())
+            oca.to_csv('oca_obj_v.csv', index=False)
+
+            (coordinates, _, _) = __batch_arrange_data_cnn(env_objects_v)
+            logits = self.eql_actor(coordinates) * self.eql_inv_temperature
+        
         dist = Categorical(logits=logits)
         if action is None:
             action = dist.sample()

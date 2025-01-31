@@ -197,10 +197,11 @@ segtracker_args = {
 }
 fastsam_args = {
     "model_path":"ckpt/FastSAM.pt",
+    #"model_path":"ckpt/sam2.1_hiera_base_plus.pt",
     "imgsz":sresolution,
     "retina":True,
-    "iou":0.9,
-    "conf":0.9,
+    "iou":0.6,
+    "conf":0.6,
     "device":'cuda',
 }
 cap = cv2.VideoCapture(io_args['input_video'])
