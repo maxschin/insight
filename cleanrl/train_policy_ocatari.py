@@ -39,7 +39,9 @@ import sympy as sy
 
 from hackatari import HackAtari
 #from ocatari.core import OCAtari
-
+import re
+from ocatari.ram.pong import Player, PlayerScore, EnemyScore
+from ocatari.vision.pong import Ball, Enemy
 
 def parse_args():
     # fmt: off
@@ -221,6 +223,37 @@ def eval_policy(envs, action_func, device="cuda", n_episode=10):
                             break
     return episode_return / total_episode, episode_length / total_episode
 
+def get_oca_obj(envs):
+    objects = []
+    for env in envs.envs:
+        raw_obj = env.objects_v
+        #print(raw_obj)
+
+        enemy_score = player_score = enemy = player = ball = [[0,0],[0,0]]
+        
+        for obj in raw_obj:
+
+            #print(type(obj))
+            if type(obj) == Player:
+                player = [list(obj._xy), list(obj.wh)]  
+                #print(player)
+            elif type(obj) == Enemy:
+                enemy = [list(obj._xy), list(obj.wh)]  
+            elif type(obj) == EnemyScore:
+                enemy_score = [list(obj._xy), list(obj.wh)]  
+            elif type(obj) == PlayerScore:
+                player_score = [list(obj._xy), list(obj.wh)] 
+            elif type(obj) == Ball:
+                ball = [list(obj._xy), list(obj.wh)]
+        
+        # Append the objects in required order
+        objects.append([enemy_score, player_score, enemy, player, ball])
+
+    objects = torch.tensor(objects, dtype=torch.float32).cuda()
+
+    #print(objects.shape)
+    # return list of shape (8,5,2,2) because of 8 envs and 5 obj in a frame each defined by 2 cartesian coordinates
+    return objects
 
 
 if __name__ == "__main__":
@@ -293,7 +326,6 @@ if __name__ == "__main__":
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
 
-    
     if args.pre_nn_agent:
         if args.pnn_guide:
             print('pnn_guide')
@@ -334,6 +366,7 @@ if __name__ == "__main__":
     loss_distill = CrossEntropyLoss()
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
+    oca_obj = torch.zeros((args.num_steps+3, args.num_envs, 5, 2, 2)).to(device) # (num_steps: 128+3 (+3 because zero padding), num_envs: 8, num_obj: 5, num_coordinates: 2, num_dimensions: 2)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -345,6 +378,8 @@ if __name__ == "__main__":
     start_time = time.time()
     next_obs, _ = envs.reset()
     next_obs = torch.Tensor(next_obs).to(device)
+    next_obj = get_oca_obj(envs) #oca_obj[3] = get_oca_obj(envs) 
+    next_obj = torch.Tensor(next_obj).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
@@ -358,7 +393,7 @@ if __name__ == "__main__":
         agent.network.train()
 
     with tqdm(total=num_updates, desc="Training Progress") as pbar:
-        for update in range(1, num_updates + 1):
+        for update in range(1, num_updates + 1): # by default ~10000 updates
             u_rate = update/num_updates
             if update%int(num_updates/100) ==0 or update==1:
                 acc = 0
@@ -407,15 +442,14 @@ if __name__ == "__main__":
             optimizer.param_groups[2]["lr"] = lrnow
             optimizer.param_groups[3]["lr"] = lrnow/args.cnn_lr_drop
 
-            for step in range(0, args.num_steps):
+            for step in range(0, args.num_steps): # individual steps (8 of them in parallel, because of 8 envs)
                 global_step += 1 * args.num_envs
                 obs[step] = next_obs
                 dones[step] = next_done
-
-                #print(next_obs)
+                oca_obj[step+3] = next_obj
                     
-                
                 # ALGO LOGIC: action logic
+                # Getting actions from neural actor
                 with torch.no_grad():
                     if args.pre_train and update<args.pre_train_uptates:
                         action, logprob, _, value,_,_ = agent.get_pretrained_action_and_value(next_obs)
@@ -431,6 +465,9 @@ if __name__ == "__main__":
                 
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
+
+                # Get object data from ocatari
+                next_obj = get_oca_obj(envs).to(device)
 
                 if "final_info" in info:
                     episode_return = 0.
@@ -474,21 +511,22 @@ if __name__ == "__main__":
             b_values = values.reshape(-1)
 
             # Optimizing the policy and value network
-            b_inds = np.arange(args.batch_size)
+            b_inds = np.arange(args.batch_size) # 128*8=1024 by default
             clipfracs = []
             writer.add_scalar("charts/adv_mean", b_advantages.mean(), global_step)
             writer.add_scalar("charts/adv_std", b_advantages.std(), global_step)
-            for epoch in range(args.update_epochs):
-                np.random.shuffle(b_inds)
-                for start in range(0, args.batch_size, args.minibatch_size):
+            for epoch in range(args.update_epochs): # 4 by default
+                np.random.shuffle(b_inds) # shuffling the order of obs/actions... within batch
+                for start in range(0, args.batch_size, args.minibatch_size): # for minibatch in batch (4 minibatches, each one containing 32*8=256 experiences)
                     # import time
                     end = start + args.minibatch_size
                     mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, newvalue,newlogits,newprob = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold)
+                    # minibatched evaluation of neural agent. 32 observations in a minibatch * 8 envs = 256 observations (each containing last 4 frames)
+                    _, newlogprob, entropy, newvalue, newlogits, newprob = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold)                    
 
-                    env_objects_v = torch.tensor([env.objects_v for env in envs.envs]).to(device)
-                    _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", env_objects_v=env_objects_v[mb_inds])
+                    # minibatched evaluation of eql agent
+                    _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", env_objects_v=oca_obj)
 
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
