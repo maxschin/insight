@@ -444,7 +444,7 @@ if __name__ == "__main__":
             optimizer.param_groups[2]["lr"] = lrnow
             optimizer.param_groups[3]["lr"] = lrnow/args.cnn_lr_drop
 
-                        # Initialize a buffer to store the last 4 frames of object data for each environment
+            # Initialize a buffer to store the last 4 frames of object data for each environment
             object_buffer = [deque([torch.zeros((5, 2, 2), device=device) for _ in range(4)], maxlen=4) 
                             for _ in range(args.num_envs)]
 
@@ -523,7 +523,7 @@ if __name__ == "__main__":
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
-            oca_obj = oca_obj.view(args.num_steps * args.num_envs, 4, 5, 2, 2)
+            b_oca_obj = oca_obj.view(args.num_steps * args.num_envs, 4, 5, 2, 2)
 
 
             # Optimizing the policy and value network
@@ -541,9 +541,9 @@ if __name__ == "__main__":
                     # minibatched evaluation of neural agent. 32 observations in a minibatch * 8 envs = 256 observations (each containing last 4 frames)
                     _, newlogprob, entropy, newvalue, newlogits, newprob = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold)                    
 
-                    # oca_obj[mb_inds] has shape (256, 4, 5, 2, 2)
+                    # b_oca_obj[mb_inds] has shape (256, 4, 5, 2, 2)
                     # minibatched evaluation of eql agent
-                    _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", oca_obj=oca_obj[mb_inds])
+                    _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", oca_obj=b_oca_obj[mb_inds])
 
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()

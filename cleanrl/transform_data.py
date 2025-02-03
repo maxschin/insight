@@ -96,10 +96,9 @@ def oca_obj_to_cnn_coords(oca_obj):
                 row[(obj_index * 2) + (512 * frame_index)] = __normalize_frame_width(step[frame_index][obj_index][0][0] + step[frame_index][obj_index][1][0]/2)
                 row[(obj_index * 2 + 1) + (512 * frame_index)] = __normalize_frame_height(step[frame_index][obj_index][0][1] + step[frame_index][obj_index][1][1]/2)
 
-                coords.append(row)
+        coords.append(row)
 
     coords = torch.Tensor(coords).to(device=oca_obj.device)
-    print(coords.device)
     return coords
 
 # loads ocatari labels from cvs file (src) and transforms it to the format the cnn uses

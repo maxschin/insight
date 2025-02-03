@@ -79,6 +79,7 @@ class Agent(nn.Module):
             #oca.to_csv('oca_obj_v.csv', index=False)
 
             coordinates = oca_obj_to_cnn_coords(oca_obj)
+            #print("OCA-CNN coord shape: ", coordinates.shape)
             logits = self.eql_actor(coordinates) * self.eql_inv_temperature
         
         dist = Categorical(logits=logits)
