@@ -2,6 +2,7 @@ import csv
 import re
 import numpy as np
 import torch
+import pandas as pd
 
 frame_width = 160
 frame_height = 210
@@ -39,7 +40,7 @@ def __load_ocatari_data(src):
             else:
                 objects[i] = [(-1,-1), (-1,-1), (0.6)] # Object does not exist
 
-        #print(objects)
+        print(objects)
         frames.append(objects)
 
     return frames
@@ -82,53 +83,31 @@ def __arrange_data_cnn(frames):
     # "all" means that it is a list of tensors for all the frames except the last 4
     return (all_label, all_shape, all_label_weight)
 
-def __batch_arrange_data_cnn(frames):
-    all_label = []
-    all_label_weight = []
-    all_shape = []
+def oca_obj_to_cnn_coords(oca_obj):
+    # oca_obj has shape (256, 4, 5, 2, 2)
+    # output needs to have shape (256, 2048)
+    coords = []
+    for step in oca_obj:
+        row = np.zeros(2048)
+        
+        for frame_index in range(len(step)):
+            for obj_index in range(len(step[frame_index])):
+                # Saving x and y coodinate of center of object into row
+                row[(obj_index * 2) + (512 * frame_index)] = __normalize_frame_width(step[frame_index][obj_index][0][0] + step[frame_index][obj_index][1][0]/2)
+                row[(obj_index * 2 + 1) + (512 * frame_index)] = __normalize_frame_height(step[frame_index][obj_index][0][1] + step[frame_index][obj_index][1][1]/2)
 
-    # frames has shape (num_envs, num_timesteps, frame_shape)
-    num_envs = frames.shape[0]  # batch size
-    num_timesteps = frames.shape[1]  # number of timesteps (sequence length)
+                coords.append(row)
 
-    # since the lookahead is 4 the last 4 frames are not looked at.
-    for i in range(0, num_timesteps - 4):
-        coord = np.zeros((num_envs, 2048))  # For each environment in the batch
-        shape = np.zeros((num_envs, 2048))
-        exist = np.zeros((num_envs, 1024))
-        exist[:] = 0.6  # 0.6 stands for non-existing objects (based on your data)
-
-        for env_idx in range(num_envs):  # Loop over environments in the batch
-            lookahead = 0
-            while lookahead < 4:
-                j = 0
-                while j < 10:  # Only the first 10 values have non-zero entries for Pong
-                    coord[env_idx, j + lookahead * 512] = __normalize_frame_width(frames[env_idx, i + lookahead][int(j / 2)][0][1] + frames[env_idx, i + lookahead][int(j / 2)][1][1] / 2)
-                    coord[env_idx, j + 1 + lookahead * 512] = __normalize_frame_height(frames[env_idx, i + lookahead][int(j / 2)][0][0] + frames[env_idx, i + lookahead][int(j / 2)][1][0] / 2)
-
-                    shape[env_idx, j + lookahead * 512] = __normalize_frame_width(frames[env_idx, i + lookahead][int(j / 2)][1][1])
-                    shape[env_idx, j + 1 + lookahead * 512] = __normalize_frame_height(frames[env_idx, i + lookahead][int(j / 2)][1][0])
-
-                    exist[env_idx, int(j / 2) + lookahead * 256] = frames[env_idx, i + lookahead][int(j / 2)][2]
-
-                    j += 2
-
-                lookahead += 1
-
-        # Convert arrays to tensors for each environment (batch-wise)
-        all_label.append(torch.Tensor(coord))
-        all_shape.append(torch.Tensor(shape))
-        all_label_weight.append(torch.Tensor(exist))
-
-    # all_label are the coordinates, all_shape are the shapes, all_label_weights are the existence values.
-    # "all" means that it is a list of tensors for all the frames except the last 4
-    return (all_label, all_shape, all_label_weight)
-
-
+    coords = torch.Tensor(coords).to(device=oca_obj.device)
+    print(coords.device)
+    return coords
 
 # loads ocatari labels from cvs file (src) and transforms it to the format the cnn uses
 def ocatari_to_cnn(src):
     return __arrange_data_cnn(__load_ocatari_data(src))
 
 
-#(all_label, _, _) = ocatari_to_cnn("Pong_dqn_ocatari_object_data.csv")
+#(all_label, _, _) = ocatari_to_cnn("Pong_dqn_ocatari_object_data1.csv")
+#all_label = pd.DataFrame(all_label)
+#all_label.to_csv('all_label.csv')
+

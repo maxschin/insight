@@ -43,6 +43,8 @@ import re
 from ocatari.ram.pong import Player, PlayerScore, EnemyScore
 from ocatari.vision.pong import Ball, Enemy
 
+from collections import deque
+
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
@@ -249,7 +251,7 @@ def get_oca_obj(envs):
         # Append the objects in required order
         objects.append([enemy_score, player_score, enemy, player, ball])
 
-    objects = torch.tensor(objects, dtype=torch.float32).cuda()
+    objects = torch.tensor(objects, dtype=torch.float32).to(device)
 
     #print(objects.shape)
     # return list of shape (8,5,2,2) because of 8 envs and 5 obj in a frame each defined by 2 cartesian coordinates
@@ -366,7 +368,7 @@ if __name__ == "__main__":
     loss_distill = CrossEntropyLoss()
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    oca_obj = torch.zeros((args.num_steps+3, args.num_envs, 5, 2, 2)).to(device) # (num_steps: 128+3 (+3 because zero padding), num_envs: 8, num_obj: 5, num_coordinates: 2, num_dimensions: 2)
+    oca_obj = torch.zeros((args.num_steps, args.num_envs, 4, 5, 2, 2)).to(device) # (num_steps: 128, num_envs: 8, num_frames:4, num_obj: 5, num_coordinates: 2, num_dimensions: 2)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -442,32 +444,44 @@ if __name__ == "__main__":
             optimizer.param_groups[2]["lr"] = lrnow
             optimizer.param_groups[3]["lr"] = lrnow/args.cnn_lr_drop
 
-            for step in range(0, args.num_steps): # individual steps (8 of them in parallel, because of 8 envs)
+                        # Initialize a buffer to store the last 4 frames of object data for each environment
+            object_buffer = [deque([torch.zeros((5, 2, 2), device=device) for _ in range(4)], maxlen=4) 
+                            for _ in range(args.num_envs)]
+
+            for step in range(0, args.num_steps):  # Individual steps (executed in parallel for 8 envs)
                 global_step += 1 * args.num_envs
                 obs[step] = next_obs
                 dones[step] = next_done
-                oca_obj[step+3] = next_obj
-                    
+
+                # Store the stacked object data for this step
+                for env_idx in range(args.num_envs):
+                    oca_obj[step, env_idx] = torch.stack(list(object_buffer[env_idx]))  # Shape: (4, 5, 2, 2)
+
                 # ALGO LOGIC: action logic
-                # Getting actions from neural actor
                 with torch.no_grad():
                     if args.pre_train and update<args.pre_train_uptates:
                         action, logprob, _, value,_,_ = agent.get_pretrained_action_and_value(next_obs)
                     else:
                         action, logprob, _, value,_,_ = agent.get_action_and_value(next_obs, threshold=args.threshold)
                     values[step] = value.flatten()
+
                 actions[step] = action
                 logprobs[step] = logprob
 
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, reward, done, _, info = envs.step(action.cpu().numpy())
-                
+
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
-                # Get object data from ocatari
-                next_obj = get_oca_obj(envs).to(device)
+                # Get new object data from ocatari
+                next_obj = get_oca_obj(envs).to(device)  # Shape: (8, 5, 2, 2)
+                #print(oca_obj[step, 0])
+
+                # Update the rolling buffer
+                for env_idx in range(args.num_envs):
+                    object_buffer[env_idx].append(next_obj[env_idx])  # Add the latest frame, automatically removes the oldest
 
                 if "final_info" in info:
                     episode_return = 0.
@@ -509,6 +523,8 @@ if __name__ == "__main__":
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
+            oca_obj = oca_obj.view(args.num_steps * args.num_envs, 4, 5, 2, 2)
+
 
             # Optimizing the policy and value network
             b_inds = np.arange(args.batch_size) # 128*8=1024 by default
@@ -525,8 +541,9 @@ if __name__ == "__main__":
                     # minibatched evaluation of neural agent. 32 observations in a minibatch * 8 envs = 256 observations (each containing last 4 frames)
                     _, newlogprob, entropy, newvalue, newlogits, newprob = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold)                    
 
+                    # oca_obj[mb_inds] has shape (256, 4, 5, 2, 2)
                     # minibatched evaluation of eql agent
-                    _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", env_objects_v=oca_obj)
+                    _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", oca_obj=oca_obj[mb_inds])
 
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()

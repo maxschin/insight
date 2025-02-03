@@ -16,7 +16,7 @@ from .eql.symbolic_network import SymbolicNet, SymbolicNetSimplified
 
 import copy
 
-from transform_data import __batch_arrange_data_cnn
+from transform_data import oca_obj_to_cnn_coords
 
 class Agent(nn.Module):
     def __init__(self, envs, args,nnagent=None):
@@ -60,11 +60,11 @@ class Agent(nn.Module):
         hidden = self.network.encoder(x / 255.0)
         return self.critic(hidden)
 
-    def get_action_and_value(self, x, action=None, threshold=0.8, actor="neural", env_objects_v=None):
+    def get_action_and_value(self, x, action=None, threshold=0.8, actor="neural", oca_obj=None):
         hidden = self.network.encoder(x / 255.0)
         if actor == "neural":
             logits = self.neural_actor(hidden) 
-        elif env_objects_v == None:
+        elif oca_obj == None:
             coordinates = self.network(x / 255.0, threshold=threshold)
             #print("CNN Coordinates: ", coordinates)
             #c_df = pd.DataFrame(coordinates.cpu().detach().numpy())
@@ -73,12 +73,12 @@ class Agent(nn.Module):
         else:
             # Using ocatari object data instead of CNN coordinates for eql actor
             # This is very much work in progress
-            print('*'*100)
-            print(env_objects_v)
-            oca = pd.DataFrame(env_objects_v.cpu().detach().numpy())
-            oca.to_csv('oca_obj_v.csv', index=False)
+            #print('*'*100)
+            #print(env_objects_v)
+            #oca = pd.DataFrame(oca_obj.cpu().detach().numpy())
+            #oca.to_csv('oca_obj_v.csv', index=False)
 
-            (coordinates, _, _) = __batch_arrange_data_cnn(env_objects_v)
+            coordinates = oca_obj_to_cnn_coords(oca_obj)
             logits = self.eql_actor(coordinates) * self.eql_inv_temperature
         
         dist = Categorical(logits=logits)
