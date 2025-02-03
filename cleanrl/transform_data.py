@@ -83,7 +83,7 @@ def __arrange_data_cnn(frames):
     # "all" means that it is a list of tensors for all the frames except the last 4
     return (all_label, all_shape, all_label_weight)
 
-def oca_obj_to_cnn_coords(oca_obj):
+def oca_obj_to_cnn_coords_old(oca_obj):
     # oca_obj has shape (256, 4, 5, 2, 2)
     # output needs to have shape (256, 2048)
     coords = []
@@ -100,6 +100,36 @@ def oca_obj_to_cnn_coords(oca_obj):
 
     coords = torch.Tensor(coords).to(device=oca_obj.device)
     return coords
+
+def oca_obj_to_cnn_coords(oca_obj):
+    # Same as oca_obj_to_cnn_coords_old, just optimized by DeepSeek R1, which leads to dramatic performance improvements
+    # oca_obj shape: (256, 4, 5, 2, 2)
+    B = oca_obj.size(0)  # Batch size (256)
+    F_total, O_total = 4, 5  # Frames and objects
+    
+    # Extract positions and sizes, compute normalized centers
+    pos_x = oca_obj[..., 0, 0]  # (B, 4, 5)
+    size_x = oca_obj[..., 1, 0]
+    center_x = (pos_x + size_x / 2) / frame_width  # Normalized x coordinates
+    
+    pos_y = oca_obj[..., 0, 1]
+    size_y = oca_obj[..., 1, 1]
+    center_y = (pos_y + size_y / 2) / frame_height  # Normalized y coordinates
+    
+    # Precompute target indices for scattering
+    frames, objs = torch.arange(F_total, device=oca_obj.device), torch.arange(O_total, device=oca_obj.device)
+    F, O = torch.meshgrid(frames, objs, indexing='ij')
+    indices = (F * 512 + O * 2).unsqueeze(-1)  # Base indices for x
+    indices = torch.cat([indices, indices + 1], dim=-1).flatten()  # (40,) indices for x and y
+    
+    # Interleave x and y values and scatter into output tensor
+    values = torch.stack([center_x, center_y], dim=-1).view(B, -1)  # (256, 40)
+    
+    output = torch.zeros(B, 2048, device=oca_obj.device)
+    output.scatter_(dim=1, index=indices.expand(B, -1), src=values)
+    
+    return output
+
 
 # loads ocatari labels from cvs file (src) and transforms it to the format the cnn uses
 def ocatari_to_cnn(src):

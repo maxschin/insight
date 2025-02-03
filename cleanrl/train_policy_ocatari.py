@@ -259,6 +259,8 @@ def get_oca_obj(envs):
 
 
 if __name__ == "__main__":
+    execution_time = 0
+
     args = parse_args()
     if args.run_name == None:
         run_name = f"{args.env_id}"+f'_{args.obj_vec_length}'+f"_gray{args.gray}"+f"_t{args.total_timesteps}"
@@ -525,6 +527,7 @@ if __name__ == "__main__":
             b_values = values.reshape(-1)
             b_oca_obj = oca_obj.view(args.num_steps * args.num_envs, 4, 5, 2, 2)
 
+            print("EQL action value agent cumulative execution time:", execution_time)
 
             # Optimizing the policy and value network
             b_inds = np.arange(args.batch_size) # 128*8=1024 by default
@@ -543,7 +546,10 @@ if __name__ == "__main__":
 
                     # b_oca_obj[mb_inds] has shape (256, 4, 5, 2, 2)
                     # minibatched evaluation of eql agent
+                    start_time = time.time()
                     _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", oca_obj=b_oca_obj[mb_inds])
+                    end_time = time.time()
+                    execution_time += end_time - start_time
 
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()

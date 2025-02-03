@@ -66,20 +66,10 @@ class Agent(nn.Module):
             logits = self.neural_actor(hidden) 
         elif oca_obj == None:
             coordinates = self.network(x / 255.0, threshold=threshold)
-            #print("CNN Coordinates: ", coordinates)
-            #c_df = pd.DataFrame(coordinates.cpu().detach().numpy())
-            #c_df.to_csv('coords.csv', index=False)
             logits = self.eql_actor(coordinates) * self.eql_inv_temperature
         else:
             # Using ocatari object data instead of CNN coordinates for eql actor
-            # This is very much work in progress
-            #print('*'*100)
-            #print(env_objects_v)
-            #oca = pd.DataFrame(oca_obj.cpu().detach().numpy())
-            #oca.to_csv('oca_obj_v.csv', index=False)
-
             coordinates = oca_obj_to_cnn_coords(oca_obj)
-            #print("OCA-CNN coord shape: ", coordinates.shape)
             logits = self.eql_actor(coordinates) * self.eql_inv_temperature
         
         dist = Categorical(logits=logits)
