@@ -226,6 +226,9 @@ def eval_policy(envs, action_func, device="cuda", n_episode=10):
     return episode_return / total_episode, episode_length / total_episode
 
 def get_oca_obj(envs):
+    # Executing this method seems to make up just around 4 mins of about 
+    # 15 hours (which I should be able to optimize to 7 hours) of training time
+    # So I don't think there's much potential for optimization here
     objects = []
     for env in envs.envs:
         raw_obj = env.objects_v
@@ -446,9 +449,11 @@ if __name__ == "__main__":
             optimizer.param_groups[2]["lr"] = lrnow
             optimizer.param_groups[3]["lr"] = lrnow/args.cnn_lr_drop
 
+            
             # Initialize a buffer to store the last 4 frames of object data for each environment
             object_buffer = [deque([torch.zeros((5, 2, 2), device=device) for _ in range(4)], maxlen=4) 
                             for _ in range(args.num_envs)]
+            
 
             for step in range(0, args.num_steps):  # Individual steps (executed in parallel for 8 envs)
                 global_step += 1 * args.num_envs
@@ -457,7 +462,7 @@ if __name__ == "__main__":
 
                 # Store the stacked object data for this step
                 for env_idx in range(args.num_envs):
-                    oca_obj[step, env_idx] = torch.stack(list(object_buffer[env_idx]))  # Shape: (4, 5, 2, 2)
+                    oca_obj[step, env_idx] = torch.stack(list(object_buffer[env_idx]))  # Shape: (4, 5, 2, 2)                
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
@@ -470,9 +475,12 @@ if __name__ == "__main__":
                 actions[step] = action
                 logprobs[step] = logprob
 
-
+                start_time = time.time()
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, reward, done, _, info = envs.step(action.cpu().numpy())
+                #next_obs, reward, done, _, info = envs.step(action.to(device)) # action.to(CUDA) doesn't help performance
+                end_time = time.time()
+                execution_time += end_time - start_time
 
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
@@ -527,7 +535,7 @@ if __name__ == "__main__":
             b_values = values.reshape(-1)
             b_oca_obj = oca_obj.view(args.num_steps * args.num_envs, 4, 5, 2, 2)
 
-            print("EQL action value agent cumulative execution time:", execution_time)
+            print("Step cumulative execution time:", execution_time)
 
             # Optimizing the policy and value network
             b_inds = np.arange(args.batch_size) # 128*8=1024 by default
@@ -546,10 +554,8 @@ if __name__ == "__main__":
 
                     # b_oca_obj[mb_inds] has shape (256, 4, 5, 2, 2)
                     # minibatched evaluation of eql agent
-                    start_time = time.time()
                     _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", oca_obj=b_oca_obj[mb_inds])
-                    end_time = time.time()
-                    execution_time += end_time - start_time
+                    
 
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()

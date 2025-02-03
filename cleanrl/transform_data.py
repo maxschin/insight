@@ -84,6 +84,7 @@ def __arrange_data_cnn(frames):
     return (all_label, all_shape, all_label_weight)
 
 def oca_obj_to_cnn_coords_old(oca_obj):
+    # Very slow method
     # oca_obj has shape (256, 4, 5, 2, 2)
     # output needs to have shape (256, 2048)
     coords = []
