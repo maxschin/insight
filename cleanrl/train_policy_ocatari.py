@@ -14,7 +14,7 @@ from functools import partial
 from stable_baselines3.common.atari_wrappers import (  # isort:skip
     ClipRewardEnv,
     EpisodicLifeEnv,
-    FireResetEnv,
+    #FireResetEnv,
     MaxAndSkipEnv,
     NoopResetEnv,
 )
@@ -40,10 +40,12 @@ import sympy as sy
 from hackatari import HackAtari
 #from ocatari.core import OCAtari
 import re
-from ocatari.ram.pong import Player, PlayerScore, EnemyScore
+from ocatari.ram.pong import Player, PlayerScore, EnemyScore#, Ball, Enemy
 from ocatari.vision.pong import Ball, Enemy
 
 from collections import deque
+
+from stable_baselines3.common.type_aliases import AtariResetReturn
 
 def parse_args():
     # fmt: off
@@ -175,6 +177,105 @@ def parse_args():
     # fmt: on
     return args
 
+class ObjExtractEnv(gym.Wrapper):
+    """
+    A wrapper that accumulates object coordinate information
+    over a fixed number of steps (the skip count) and then
+    attaches the accumulated stack to the info dictionary on the final step.
+    """
+    def __init__(self, env: gym.Env, skip: int):
+        super().__init__(env)
+        self.skip = skip  # should match the skip in MaxAndSkipEnv
+        self._coord_buffer = []  # to accumulate coordinate info
+        self._counter = 0
+
+    def step(self, action):
+        # Step the underlying environment.
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        # Get the object coordinates for this step.
+        coord = self.get_oca_obj(self.env)
+        # Accumulate the coordinate info.
+        self._coord_buffer.append(coord)
+        self._counter += 1
+
+        # Decide whether this is the final call in the skip cycle.
+        if terminated or truncated or self._counter == self.skip:
+            # Convert the list of coordinates to a NumPy array.
+            # This gives you an array of shape (n, 5, 2, 2), where n is either skip or fewer if done early.
+            info['obj_coords'] = np.stack(self._coord_buffer)
+            # Reset the counter and buffer for the next skip cycle.
+            self._coord_buffer = []
+            self._counter = 0
+        else:
+            # For intermediate steps you might leave the key unset or set it to None.
+            info['obj_coords'] = None
+
+        return obs, reward, terminated, truncated, info
+    
+    def get_oca_obj(self, env):
+        # Executing this method seems to make up just around 4 mins of about 
+        # 15 hours (which I should be able to optimize to 7 hours) of training time
+        # So I don't think there's much potential for optimization here
+        raw_obj = env.objects_v
+        #print(raw_obj)
+
+        enemy_score = player_score = enemy = player = ball = [[0,0],[0,0]]
+        
+        for obj in raw_obj:
+
+            #print(type(obj))
+            if type(obj) == Player:
+                player = [list(obj._xy), list(obj.wh)]  
+                #print(player)
+            elif type(obj) == Enemy:
+                enemy = [list(obj._xy), list(obj.wh)]  
+            elif type(obj) == EnemyScore:
+                enemy_score = [list(obj._xy), list(obj.wh)]  
+            elif type(obj) == PlayerScore:
+                player_score = [list(obj._xy), list(obj.wh)] 
+            elif type(obj) == Ball:
+                ball = [list(obj._xy), list(obj.wh)]
+            else:
+                if False:
+                    try:
+                        print('Unidentified OC Atari Object with bounding box (xywh): ', obj._xy, obj.wh)
+                        print('            Type of that object: ', type(obj))
+                    except:
+                        print('Unidentified OC Atari Object with no _xy or wh property...')
+
+        # return list of shape (5,2,2) because of 5 obj in a frame each defined by 2 cartesian coordinates
+        return [enemy_score, player_score, enemy, player, ball]
+
+    def reset(self, **kwargs):
+        # Reset the accumulation when the environment is reset.
+        self._coord_buffer = []
+        self._counter = 0
+        return self.env.reset(**kwargs)
+    
+
+class FireResetEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
+    """
+    Take action on reset for environments that are fixed until firing.
+
+    :param env: Environment to wrap
+    """
+
+    def __init__(self, env: gym.Env) -> None:
+        super().__init__(env)
+        assert env.unwrapped.get_action_meanings()[1] == "FIRE"  # type: ignore[attr-defined]
+        assert len(env.unwrapped.get_action_meanings()) >= 3  # type: ignore[attr-defined]
+
+    def reset(self, **kwargs) -> AtariResetReturn:
+        self.env.reset(**kwargs)
+        obs, _, terminated, truncated, info = self.env.step(1)
+        if terminated or truncated:
+            self.env.reset(**kwargs)
+        obs, _, terminated, truncated, info = self.env.step(2)
+        if terminated or truncated:
+            self.env.reset(**kwargs)
+        return obs, info
+
+
 
 def make_env(env_id, seed, idx, capture_video, run_name, args):
     def thunk():
@@ -183,7 +284,8 @@ def make_env(env_id, seed, idx, capture_video, run_name, args):
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env = NoopResetEnv(env, noop_max=30)
+        env = NoopResetEnv(env, noop_max=30) 
+        env = ObjExtractEnv(env, skip = 4) # Custom wrapper such that step method returns OC Atari object coordinates
         env = MaxAndSkipEnv(env, skip=4)
         env = EpisodicLifeEnv(env)
         if "FIRE" in env.unwrapped.get_action_meanings():
@@ -224,41 +326,6 @@ def eval_policy(envs, action_func, device="cuda", n_episode=10):
                         if total_episode == n_episode:
                             break
     return episode_return / total_episode, episode_length / total_episode
-
-def get_oca_obj(envs):
-    # Executing this method seems to make up just around 4 mins of about 
-    # 15 hours (which I should be able to optimize to 7 hours) of training time
-    # So I don't think there's much potential for optimization here
-    objects = []
-    for env in envs.envs:
-        raw_obj = env.objects_v
-        #print(raw_obj)
-
-        enemy_score = player_score = enemy = player = ball = [[0,0],[0,0]]
-        
-        for obj in raw_obj:
-
-            #print(type(obj))
-            if type(obj) == Player:
-                player = [list(obj._xy), list(obj.wh)]  
-                #print(player)
-            elif type(obj) == Enemy:
-                enemy = [list(obj._xy), list(obj.wh)]  
-            elif type(obj) == EnemyScore:
-                enemy_score = [list(obj._xy), list(obj.wh)]  
-            elif type(obj) == PlayerScore:
-                player_score = [list(obj._xy), list(obj.wh)] 
-            elif type(obj) == Ball:
-                ball = [list(obj._xy), list(obj.wh)]
-        
-        # Append the objects in required order
-        objects.append([enemy_score, player_score, enemy, player, ball])
-
-    objects = torch.tensor(objects, dtype=torch.float32).to(device)
-
-    #print(objects.shape)
-    # return list of shape (8,5,2,2) because of 8 envs and 5 obj in a frame each defined by 2 cartesian coordinates
-    return objects
 
 
 if __name__ == "__main__":
@@ -383,10 +450,10 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs, _ = envs.reset()
+    next_obs, info = envs.reset()
     next_obs = torch.Tensor(next_obs).to(device)
-    next_obj = get_oca_obj(envs) #oca_obj[3] = get_oca_obj(envs) 
-    next_obj = torch.Tensor(next_obj).to(device)
+    next_obj = np.stack(info['obj_coords'], axis=0).astype(np.float32)  # Saving OCAtari object coordinates [Shape (8, 4, 5, 2, 2)]
+    next_obj = torch.tensor(next_obj, dtype=torch.float32).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
@@ -404,7 +471,7 @@ if __name__ == "__main__":
             u_rate = update/num_updates
             if update%int(num_updates/100) ==0 or update==1:
                 acc = 0
-                agent.network.eval()
+                agent.network.eval()    
                 with torch.no_grad():
                     for idx, (test_x, test_label, _, _) in enumerate(test_loader):
                         test_x = test_x.to(device)
@@ -450,19 +517,31 @@ if __name__ == "__main__":
             optimizer.param_groups[3]["lr"] = lrnow/args.cnn_lr_drop
 
             
-            # Initialize a buffer to store the last 4 frames of object data for each environment
-            object_buffer = [deque([torch.zeros((5, 2, 2), device=device) for _ in range(4)], maxlen=4) 
-                            for _ in range(args.num_envs)]
-            
 
             for step in range(0, args.num_steps):  # Individual steps (executed in parallel for 8 envs)
                 global_step += 1 * args.num_envs
                 obs[step] = next_obs
                 dones[step] = next_done
+                oca_obj[step] = next_obj
 
-                # Store the stacked object data for this step
-                for env_idx in range(args.num_envs):
-                    oca_obj[step, env_idx] = torch.stack(list(object_buffer[env_idx]))  # Shape: (4, 5, 2, 2)                
+                '''
+                Just for debugging and checking that observations and ocatari object data fits together
+                if step <=20:
+                    #df = pd.DataFrame(next_obs[0].cpu().numpy().reshape(4,7056))
+                    #df.to_csv("next_obs_0.csv")
+                    for f_index, frame  in enumerate(next_obs[0]):
+                        plt.imshow(frame.cpu().numpy(), cmap='gray') 
+                        x = (next_obj[0, f_index, :, 0, 0].cpu() / 160) * 84
+                        y = (next_obj[0, f_index, :, 0, 1].cpu() / 210) * 84
+                        plt.scatter(x= x, y= y, color='green', marker=(4,1), s=10)
+                        x2 = x + (next_obj[0, f_index, :, 1, 0].cpu() / 160) * 84 
+                        y2 = y + (next_obj[0, f_index, :, 1, 1].cpu() / 160) * 84
+                        plt.scatter(x=x2, y=y2, color='blue', marker=(4,1), s=10)
+                        plt.savefig(f'Step{step}Frame{f_index}.png', bbox_inches='tight')
+                        plt.clf()
+                else:
+                    print(10/0)        
+                ''' 
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
@@ -485,13 +564,8 @@ if __name__ == "__main__":
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
-                # Get new object data from ocatari
-                next_obj = get_oca_obj(envs).to(device)  # Shape: (8, 5, 2, 2)
-                #print(oca_obj[step, 0])
-
-                # Update the rolling buffer
-                for env_idx in range(args.num_envs):
-                    object_buffer[env_idx].append(next_obj[env_idx])  # Add the latest frame, automatically removes the oldest
+                next_obj = np.stack(info['obj_coords'], axis=0).astype(np.float32)  # Shape (8, 4, 5, 2, 2)
+                next_obj = torch.tensor(next_obj, dtype=torch.float32).to(device)
 
                 if "final_info" in info:
                     episode_return = 0.
