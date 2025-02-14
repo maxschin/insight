@@ -10,42 +10,22 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from functools import partial
 from stable_baselines3.common.atari_wrappers import (  # isort:skip
     ClipRewardEnv,
     EpisodicLifeEnv,
-    #FireResetEnv,
+    FireResetEnv,
     MaxAndSkipEnv,
     NoopResetEnv,
 )
-from itertools import chain
 from agents.eql.regularization import L12Smooth
-from agents.agent import Agent
-import matplotlib.pyplot as plt
+from agents.agent import load_agent, AgentSimplified
+from hackatari_env import HackAtariWrapper, SyncVectorEnvWrapper
+from hackatari_utils import save_equations, get_reward_func_path
 
-#dataset
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
-from train_cnn import CustomImageDataset, coordinate_label_to_existence_label, binary_focal_loss_with_logits
 from torch.nn import CrossEntropyLoss
-from torch.optim import Adam
-import torch.nn.functional as F
 
-import copy
-from visualize_utils import visual_for_videos,visual, visual_for_agent_videos
+from visualize_utils import visual_for_ocatari_agent_videos
 from tqdm import tqdm
-import itertools
-import sympy as sy
-
-from hackatari import HackAtari
-#from ocatari.core import OCAtari
-import re
-from ocatari.ram.pong import Player, PlayerScore, EnemyScore#, Ball, Enemy
-from ocatari.vision.pong import Ball, Enemy
-
-from collections import deque
-
-from stable_baselines3.common.type_aliases import AtariResetReturn
 
 def parse_args():
     # fmt: off
@@ -60,16 +40,23 @@ def parse_args():
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
+    parser.add_argument("--wandb-project-name", type=str, default="insight",
         help="the wandb's project name")
     parser.add_argument("--wandb-entity", type=str, default=None,
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
+    # Hackatari specific arguments
+    parser.add_argument("-g", "--game", type=str,
+                        default="Pong", help="Game to be run")
+    parser.add_argument("-m", "--modifs", nargs="+", default=[],
+                        help="List of modifications to the game")
+    parser.add_argument("-rf", "--reward_function", type=str,
+                        default="", help="Custom reward function file name")
+
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="PongNoFrameskip-v4",
-        help="the id of the environment")
+    parser.add_argument("--agent_type", type=str, default="AgentSimplified", help="class name of the agent to be used")
     parser.add_argument("--total-timesteps", type=int, default=10000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4,
@@ -104,12 +91,10 @@ def parse_args():
         help="the target KL divergence threshold")
     parser.add_argument("--run-name", type=str, default=None,
         help="the defined run_name")
-    parser.add_argument("--reg_weight", type=float, default=0,
+    parser.add_argument("--reg_weight", type=float, default= 1e-3,
         help="regulization for interpertable")
     parser.add_argument("--use_nn", type=lambda x: bool(strtobool(x)), default=True,
         help="use nn for critic")
-    parser.add_argument("--cnn_out_dim", type=int, default=128,
-        help="cnn_out_dim")
     parser.add_argument("--deter_action", type=lambda x: bool(strtobool(x)), default=False,
         help="deterministic action or not")
     parser.add_argument("--pre_nn_agent", type=lambda x: bool(strtobool(x)), default=False,
@@ -120,185 +105,40 @@ def parse_args():
         help="n_funcs")
     parser.add_argument("--n_layers", type=int, default=1,
         help="n_layers")
-    parser.add_argument("--load_cnn", type=lambda x: bool(strtobool(x)), default=True,
-        help="load_cnn")
-    parser.add_argument("--cover_cnn", type=lambda x: bool(strtobool(x)), default=False,
-        help="load_cnn and cover loaded neural agent")
-    parser.add_argument("--ng", type=lambda x: bool(strtobool(x)), default=False,
+    parser.add_argument("--ng", type=lambda x: bool(strtobool(x)), default=True,
         help="neural guided or not")
-    parser.add_argument("--fix_cnn", type=lambda x: bool(strtobool(x)), default=False,
-        help="fix_cnn")
     parser.add_argument("--visual", type=lambda x: bool(strtobool(x)), default=False,
         help="visualize or not")
     parser.add_argument("--save", type=lambda x: bool(strtobool(x)), default=True,
         help="save")
-    parser.add_argument("--cnn_lr_drop", type=int, default=1,
-        help="cnn_lr")
-    parser.add_argument("--sam_track_data", type=lambda x: bool(strtobool(x)), default=True,
-        help="use dataset generated by sam_track to train the agent")
-    parser.add_argument("--mass_centri_cnn", type=bool, default=False,
-        help="use mass_centri_cnn or not")
-    parser.add_argument("--n_objects", type=int, default=256,
-        help="n_objects")
-    parser.add_argument("--resolution", type=int, default=84,
-        help="resolution")
-    parser.add_argument("--single_frame", type=bool, default=False,
-        help="single frame or not")
-    parser.add_argument("--cors", type=lambda x: bool(strtobool(x)), default=True,
-        help="use cors")
-    parser.add_argument("--bbox", type=lambda x: bool(strtobool(x)), default=False,
-        help="use bbox")
-    parser.add_argument("--rgb", type=lambda x: bool(strtobool(x)), default=False,
-        help="use rgb")
-    parser.add_argument("--obj_vec_length", type=int, default=2,
-        help="obj vector length")
     parser.add_argument("--pre_train", type=lambda x: bool(strtobool(x)), default=False,
         help="pretrain agent or not")
     parser.add_argument("--pre_train_uptates", type=int, default=500,
         help="number of pre-train update")
-    parser.add_argument("--gray", type=lambda x: bool(strtobool(x)), default=True,
-        help="use gray or not")
     parser.add_argument("--clip_drop", type=lambda x: bool(strtobool(x)), default=False,
         help="drop clip-coef or not")
     parser.add_argument("--pnn_guide", type=lambda x: bool(strtobool(x)), default=False,
         help="use pure nn guide or not")
-    parser.add_argument("--cnn_loss_weight", type=float, default=2.)
-    parser.add_argument("--coordinate_loss", type=str, default="l1")
     parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--cnn_weight_decay", type=float, default=1e-4)
     parser.add_argument("--distillation_loss_weight", type=float, default=1)
     parser.add_argument("--reg_weight_drop", type=lambda x: bool(strtobool(x)), default=True,
         help="drop reg weight or not")   
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
-    args.obj_vec_length = args.cors*2+args.bbox*4+args.rgb*3
-    args.cnn_out_dim = args.n_objects*args.obj_vec_length*4
     # fmt: on
     return args
 
-class ObjExtractEnv(gym.Wrapper):
-    """
-    A wrapper that accumulates object coordinate information
-    over a fixed number of steps (the skip count) and then
-    attaches the accumulated stack to the info dictionary on the final step.
-    """
-    def __init__(self, env: gym.Env, skip: int):
-        super().__init__(env)
-        self.skip = skip  # should match the skip in MaxAndSkipEnv
-        self._coord_buffer = []  # to accumulate coordinate info
-        self._counter = 0
-
-    def step(self, action):
-        # Step the underlying environment.
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        # Get the object coordinates for this step.
-        coord = self.get_oca_obj(self.env)
-        # Accumulate the coordinate info.
-        self._coord_buffer.append(coord)
-        self._counter += 1
-
-        # Decide whether this is the final call in the skip cycle.
-        if terminated or truncated or self._counter == self.skip:
-            # Convert the list of coordinates to a NumPy array.
-            # This gives you an array of shape (n, 5, 2, 2), where n is either skip or fewer if done early.
-            info['obj_coords'] = np.stack(self._coord_buffer)
-            # Reset the counter and buffer for the next skip cycle.
-            self._coord_buffer = []
-            self._counter = 0
-        else:
-            # For intermediate steps you might leave the key unset or set it to None.
-            info['obj_coords'] = None
-
-        return obs, reward, terminated, truncated, info
-    
-    def get_oca_obj(self, env):
-        # Executing this method seems to make up just around 4 mins of about 
-        # 15 hours (which I should be able to optimize to 7 hours) of training time
-        # So I don't think there's much potential for optimization here
-        raw_obj = env.objects_v
-        #print(raw_obj)
-
-        enemy_score = player_score = enemy = player = ball = [[0,0],[0,0]]
-        
-        for obj in raw_obj:
-
-            #print(type(obj))
-            if type(obj) == Player:
-                player = [list(obj._xy), list(obj.wh)]  
-                #print(player)
-            elif type(obj) == Enemy:
-                enemy = [list(obj._xy), list(obj.wh)]  
-            elif type(obj) == EnemyScore:
-                enemy_score = [list(obj._xy), list(obj.wh)]  
-            elif type(obj) == PlayerScore:
-                player_score = [list(obj._xy), list(obj.wh)] 
-            elif type(obj) == Ball:
-                ball = [list(obj._xy), list(obj.wh)]
-            else:
-                if False:
-                    try:
-                        print('Unidentified OC Atari Object with bounding box (xywh): ', obj._xy, obj.wh)
-                        print('            Type of that object: ', type(obj))
-                    except:
-                        print('Unidentified OC Atari Object with no _xy or wh property...')
-
-        # return list of shape (5,2,2) because of 5 obj in a frame each defined by 2 cartesian coordinates
-        return [enemy_score, player_score, enemy, player, ball]
-
-    def reset(self, **kwargs):
-        # Reset the accumulation when the environment is reset.
-        self._coord_buffer = []
-        self._counter = 0
-        return self.env.reset(**kwargs)
-    
-
-class FireResetEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
-    """
-    Take action on reset for environments that are fixed until firing.
-
-    :param env: Environment to wrap
-    """
-
-    def __init__(self, env: gym.Env) -> None:
-        super().__init__(env)
-        assert env.unwrapped.get_action_meanings()[1] == "FIRE"  # type: ignore[attr-defined]
-        assert len(env.unwrapped.get_action_meanings()) >= 3  # type: ignore[attr-defined]
-
-    def reset(self, **kwargs) -> AtariResetReturn:
-        self.env.reset(**kwargs)
-        obs, _, terminated, truncated, info = self.env.step(1)
-        if terminated or truncated:
-            self.env.reset(**kwargs)
-        obs, _, terminated, truncated, info = self.env.step(2)
-        if terminated or truncated:
-            self.env.reset(**kwargs)
-        return obs, info
-
-
-
-def make_env(env_id, seed, idx, capture_video, run_name, args):
+def make_env(env_name, seed,rewardfunc_path, modifs):
     def thunk():
-        env = HackAtari(env_id, mode='both', hud=True, render_mode='rgb_array', obs_mode='dqn')  # Using OCAtari specific initialization
+        env = HackAtariWrapper(env_name, modifs=modifs, rewardfunc_path=rewardfunc_path)  
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env = NoopResetEnv(env, noop_max=30) 
-        env = ObjExtractEnv(env, skip = 4) # Custom wrapper such that step method returns OC Atari object coordinates
-        env = MaxAndSkipEnv(env, skip=4)
+        # env = MaxAndSkipEnv(env, skip=4) -> done by hackatari by default
         env = EpisodicLifeEnv(env)
         if "FIRE" in env.unwrapped.get_action_meanings():
             env = FireResetEnv(env)
         env = ClipRewardEnv(env)
-        # Resizing the env is not necessary because it already has the correct size and otherwise creates a conflict
-        #env = gym.wrappers.ResizeObservation(env, (args.resolution, args.resolution))
-
-        # I think it's okay to comment this out because the HackAtari/OCAtari env obs space already comes without color channel 
-        #if args.gray:
-        #    env = gym.wrappers.GrayScaleObservation(env)
-        # Same story with FrameStack as with GrayScaleObservation and ResizeObservation
-        #env = gym.wrappers.FrameStack(env, 4)
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -333,19 +173,18 @@ if __name__ == "__main__":
 
     args = parse_args()
     if args.run_name == None:
-        run_name = f"{args.env_id}"+f'_{args.obj_vec_length}'+f"_gray{args.gray}"+f"_t{args.total_timesteps}"
-        if args.pre_nn_agent:
-            run_name+="_pre_nn_agent"
-        if args.ng:
-            run_name+="_ng"
-        if args.pnn_guide:
-            run_name+="_png"
-        if args.fix_cnn:
-            run_name+="_fix_cnn"
-        if args.cover_cnn:
-            run_name+="_cover_cnn"
-        run_name += f"_objs{args.n_objects}"
-        run_name+=f"_seed{args.seed}"
+        run_name = f"{args.game}" + f"_{args.agent_type}" 
+        if args.reward_function:
+            run_name += f"_{args.reward_function}"
+        if args.modifs:
+            run_name += f"_{''.join(args.modifs)}"
+        #if args.pre_nn_agent:
+        #    run_name+="_pre_nn_agent"
+        #if args.ng:
+        #    run_name+="_ng"
+        #if args.pnn_guide:
+        #    run_name+="_png"
+        #run_name+=f"_seed{args.seed}"
     else:
         run_name = args.run_name
     if args.track:
@@ -359,23 +198,7 @@ if __name__ == "__main__":
             name=run_name,
             monitor_gym=True,
             save_code=True,
-            mode="disabled" # TODO this is just temporary
         )
-    #sam_track_data:
-    asset_dir = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "cleanrl/sam_track/assets")
-    images_dir = os.path.join(asset_dir, f'{args.env_id}'+'_masks_train')
-    labels = os.path.join(images_dir, 'labels.json')
-    images_dir_test = os.path.join(asset_dir, f'{args.env_id}'+'_masks_test')
-    labels_test = os.path.join(images_dir_test, 'labels.json')
-
-    train_dataset = CustomImageDataset(images_dir,labels,args,train_flag=True)
-    test_dataset = CustomImageDataset(images_dir_test,labels_test,args,train_flag=True)
-    train_loader = DataLoader(train_dataset, batch_size=args.minibatch_size,num_workers=4, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=args.minibatch_size)
-    train_data = itertools.cycle(train_loader)
-    test_data = iter(test_loader)
-
 
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
@@ -393,13 +216,16 @@ if __name__ == "__main__":
 
     
     # Setup multiple OCAtari environments
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name, args) for i in range(args.num_envs)])
-    envs_eval = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name, args) for i in range(args.num_envs)])
+    rewardfunc_path = get_reward_func_path(args.game, args.reward_function) if args.reward_function else None
+    envs = SyncVectorEnvWrapper(
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs)])
+    envs_eval = SyncVectorEnvWrapper(
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs)])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    agent_in_dim = envs.get_ns_out_dim()
 
 
+    agent_class = load_agent(args.agent_type)
     if args.pre_nn_agent:
         if args.pnn_guide:
             print('pnn_guide')
@@ -407,18 +233,13 @@ if __name__ == "__main__":
         else:
             agent_nn = torch.load('models/agents/'+f"{args.env_id}"+f'_{args.obj_vec_length}'+f"_gray{args.gray}"+f"_t{args.total_timesteps}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'.pth').to(device)
             print('nn_guide')
-        agent = Agent(envs,args,agent_nn).to(device)
+        agent = agent_class(envs,args,agent_nn, agent_in_dim=agent_in_dim, skip_perception=True).to(device)
         for param in agent_nn.parameters():
             param.requires_grad = False
-        if args.cover_cnn:
-            agent.network = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
     else:
-        agent = Agent(envs,args).to(device)
+        agent = agent_class(envs,args, agent_in_dim=agent_in_dim, skip_perception=True).to(device)
 
     #fix hypara
-    if args.fix_cnn:
-            for param in agent.network.parameters():
-                param.requires_grad = False
     if args.fix_cri:
             for param in agent.critic.parameters():
                 param.requires_grad = False
@@ -427,20 +248,12 @@ if __name__ == "__main__":
         [{'params':agent.neural_actor.parameters(),'lr':args.learning_rate },
          {'params':agent.eql_actor.parameters(),'lr':args.learning_rate},
          {'params':agent.critic.parameters(),'lr':args.learning_rate},
-         {'params':agent.network.parameters(),'lr':args.learning_rate/args.cnn_lr_drop,'weight_decay': args.cnn_weight_decay}], eps=1e-5)
-
-    if args.coordinate_loss == "l2":
-        coordinate_loss_fn = torch.nn.functional.mse_loss
-    elif args.coordinate_loss == "l1":
-        coordinate_loss_fn = torch.nn.functional.l1_loss
-    else:
-        raise NotImplementedError
+         ], eps=1e-5)
 
     regularization = L12Smooth()
     loss_distill = CrossEntropyLoss()
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    oca_obj = torch.zeros((args.num_steps, args.num_envs, 4, 5, 2, 2)).to(device) # (num_steps: 128, num_envs: 8, num_frames:4, num_obj: 5, num_coordinates: 2, num_dimensions: 2)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -452,33 +265,25 @@ if __name__ == "__main__":
     start_time = time.time()
     next_obs, info = envs.reset()
     next_obs = torch.Tensor(next_obs).to(device)
-    next_obj = np.stack(info['obj_coords'], axis=0).astype(np.float32)  # Saving OCAtari object coordinates [Shape (8, 4, 5, 2, 2)]
-    next_obj = torch.tensor(next_obj, dtype=torch.float32).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
-    # Setup directory for visualization
-    os.makedirs('ppoeql_stack_cnn_out_frames', exist_ok=True)
-    os.makedirs(os.path.join('ppoeql_stack_cnn_out_frames', run_name), exist_ok=True)
-    os.makedirs(os.path.join('ppoeql_stack_cnn_out_frames', run_name,'test'), exist_ok=True)
-    os.makedirs(os.path.join('ppoeql_stack_cnn_out_frames', run_name,'record'), exist_ok=True)
-
-    with torch.no_grad():
-        agent.network.train()
+    # Setup directory for saving equations and visualizations
+    base_folder = 'ppoeql_ocatari_videos'
+    os.makedirs(base_folder, exist_ok=True)
+    run_folder = os.path.join(base_folder, run_name)
+    os.makedirs(run_folder, exist_ok=True)
+    test_folder = os.path.join(run_folder, 'test')
+    record_folder = os.path.join(run_folder, 'record')
+    os.makedirs(test_folder, exist_ok=True)
+    os.makedirs(record_folder, exist_ok=True)
+    equations_folder = "equations"
+    os.makedirs(equations_folder, exist_ok=True)
 
     with tqdm(total=num_updates, desc="Training Progress") as pbar:
         for update in range(1, num_updates + 1): # by default ~10000 updates
             u_rate = update/num_updates
             if update%int(num_updates/100) ==0 or update==1:
-                acc = 0
-                agent.network.eval()    
-                with torch.no_grad():
-                    for idx, (test_x, test_label, _, _) in enumerate(test_loader):
-                        test_x = test_x.to(device)
-                        test_label = test_label.to(device)
-                        existence_label, existence_mask = coordinate_label_to_existence_label(test_label)
-                        predict_y = agent.network(test_x.float(), threshold=0.5).detach()
-                        acc = acc + (coordinate_loss_fn(predict_y, test_label, reduction='none') * existence_mask).sum(1).mean(0)
                 if args.ng:
                     action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor="eql")[0]
                     eql_returns, eql_lengths = eval_policy(
@@ -487,12 +292,10 @@ if __name__ == "__main__":
                         "charts/eql_returns", eql_returns, global_step)
                     writer.add_scalar(
                         "charts/eql_lengths", eql_lengths, global_step)
-                agent.network.train()
-                writer.add_scalar("losses/test_cnn_dataset_loss", acc/len(test_loader), global_step)
             if update%int(num_updates/10) ==0 or update==1:
-                visual_for_agent_videos(envs_eval, agent, next_obs, device, args,run_name, threshold=args.threshold)
-                video_path = os.path.join('ppoeql_stack_cnn_out_frames', run_name, 'test_seg.mp4')
+                video_path = visual_for_ocatari_agent_videos(envs_eval, agent, device, args, test_folder, actor="neural")
                 wandb.log({"test_seg": wandb.Video(video_path, fps=20, format="mp4")})
+
                 if args.save:
                     torch.save(agent, 'models/agents/'+run_name+'.pth')
 
@@ -514,7 +317,6 @@ if __name__ == "__main__":
             optimizer.param_groups[0]["lr"] = lrnow
             optimizer.param_groups[1]["lr"] = lrnow
             optimizer.param_groups[2]["lr"] = lrnow
-            optimizer.param_groups[3]["lr"] = lrnow/args.cnn_lr_drop
 
             
 
@@ -522,26 +324,6 @@ if __name__ == "__main__":
                 global_step += 1 * args.num_envs
                 obs[step] = next_obs
                 dones[step] = next_done
-                oca_obj[step] = next_obj
-
-                '''
-                Just for debugging and checking that observations and ocatari object data fits together
-                if step <=20:
-                    #df = pd.DataFrame(next_obs[0].cpu().numpy().reshape(4,7056))
-                    #df.to_csv("next_obs_0.csv")
-                    for f_index, frame  in enumerate(next_obs[0]):
-                        plt.imshow(frame.cpu().numpy(), cmap='gray') 
-                        x = (next_obj[0, f_index, :, 0, 0].cpu() / 160) * 84
-                        y = (next_obj[0, f_index, :, 0, 1].cpu() / 210) * 84
-                        plt.scatter(x= x, y= y, color='green', marker=(4,1), s=10)
-                        x2 = x + (next_obj[0, f_index, :, 1, 0].cpu() / 160) * 84 
-                        y2 = y + (next_obj[0, f_index, :, 1, 1].cpu() / 160) * 84
-                        plt.scatter(x=x2, y=y2, color='blue', marker=(4,1), s=10)
-                        plt.savefig(f'Step{step}Frame{f_index}.png', bbox_inches='tight')
-                        plt.clf()
-                else:
-                    print(10/0)        
-                ''' 
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
@@ -557,15 +339,11 @@ if __name__ == "__main__":
                 start_time = time.time()
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, reward, done, _, info = envs.step(action.cpu().numpy())
-                #next_obs, reward, done, _, info = envs.step(action.to(device)) # action.to(CUDA) doesn't help performance
                 end_time = time.time()
                 execution_time += end_time - start_time
 
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
-
-                next_obj = np.stack(info['obj_coords'], axis=0).astype(np.float32)  # Shape (8, 4, 5, 2, 2)
-                next_obj = torch.tensor(next_obj, dtype=torch.float32).to(device)
 
                 if "final_info" in info:
                     episode_return = 0.
@@ -607,9 +385,8 @@ if __name__ == "__main__":
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
-            b_oca_obj = oca_obj.view(args.num_steps * args.num_envs, 4, 5, 2, 2)
 
-            print("Step cumulative execution time:", execution_time)
+            #print("Step cumulative execution time:", execution_time)
 
             # Optimizing the policy and value network
             b_inds = np.arange(args.batch_size) # 128*8=1024 by default
@@ -626,9 +403,8 @@ if __name__ == "__main__":
                     # minibatched evaluation of neural agent. 32 observations in a minibatch * 8 envs = 256 observations (each containing last 4 frames)
                     _, newlogprob, entropy, newvalue, newlogits, newprob = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold)                    
 
-                    # b_oca_obj[mb_inds] has shape (256, 4, 5, 2, 2)
                     # minibatched evaluation of eql agent
-                    _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql", oca_obj=b_oca_obj[mb_inds])
+                    _, _, _, _, eq_logits, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds], threshold=args.threshold, actor="eql")
                     
 
                     logratio = newlogprob - b_logprobs[mb_inds]
@@ -676,29 +452,12 @@ if __name__ == "__main__":
                         else:
                             distillation_loss = 0
                             reg_loss = 0
-                    
-                        train_x, train_label, train_label_weight, train_shape = next(train_data)
-                        train_x = train_x.to(device)
-                        train_label = train_label.to(device)
-                        train_label_weight = train_label_weight.to(device)
-                        train_shape = train_shape.to(device)
-                        existence_label, existence_mask = coordinate_label_to_existence_label(train_label)
-                        train_label_weight_mask = train_label_weight.unsqueeze(-1).repeat(1, 1, args.obj_vec_length).flatten(start_dim=1)
-                        predict_y, existence_logits, predict_shape = agent.network(
-                            train_x.float(), return_existence_logits=True, clip_coordinates=False, return_shape=True)
-                        coordinate_loss = (coordinate_loss_fn(predict_y, train_label, reduction='none') * existence_mask * train_label_weight_mask).sum(1).mean(0)
-                        shape_loss = (coordinate_loss_fn(predict_shape, train_shape, reduction='none') * existence_mask * train_label_weight_mask).sum(1).mean(0)
-                        existence_loss = binary_focal_loss_with_logits(existence_logits, existence_label, reduction='none')
-                        existence_loss = (existence_loss * train_label_weight).sum(1).mean(0)
-                        loss_cnn = coordinate_loss + existence_loss + shape_loss
-                        writer.add_scalar("losses/cnn_dataset_loss", loss_cnn, global_step)
                     else:
                         distillation_loss = 0
                         reg_loss = 0
                         loss_cnn = 0
                     loss = pg_loss - args.ent_coef * entropy_loss\
                            + args.vf_coef * v_loss\
-                           + args.cnn_loss_weight * loss_cnn\
                            + args.distillation_loss_weight * distillation_loss\
                            + reg_weight_now * reg_loss
                     optimizer.zero_grad()
@@ -728,12 +487,16 @@ if __name__ == "__main__":
             pbar.update(1)   
     if args.save:
         torch.save(agent, 'models/agents/'+run_name+'.pth')
-    #eql
-    '''if args.eql:
-        with torch.no_grad():
-            expra = pretty_print.network(agent.actor.get_weights(), agent.activation_funcs, var_names[:args.cnn_out_dim])
-            for i in range(envs.single_action_space.n):
-                print(f"action{i}:")
-                sy.pprint(sy.simplify(expra[i]))'''
+
+    # finally: collect equations and record final video of eql-agent
+    video_path = visual_for_ocatari_agent_videos(envs_eval, agent, device, args, record_folder, actor="eql", n_step=2000, label="final")
+    wandb.log({"final_eql": wandb.Video(video_path, fps=20, format="mp4")})
+
+    if isinstance(agent, AgentSimplified):
+        variable_names = envs.get_variable_names()
+        output_names = envs.get_action_names()
+        equation_list = agent.eql_actor.pretty_print(variable_names, output_names)
+        save_equations(equation_list, equations_folder, run_name)
+
     envs.close()
     writer.close()

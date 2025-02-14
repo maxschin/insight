@@ -129,3 +129,25 @@ def filter_expr2(expr, threshold=0.01):
         if isinstance(a, sym.Float) and a < threshold:
             expr = expr.subs(a, 0)
     return expr
+
+def round_expr(expr, accuracy=0.01):
+    """
+    Rounds all numeric coefficients and constants in the expression 
+    to the nearest multiple of the specified accuracy.
+
+    Parameters:
+        expr (sympy expression): The expression to be rounded.
+        accuracy (float): The rounding increment (e.g. 0.01 to round to two decimal places).
+
+    Returns:
+        sympy expression: A new expression with all numeric constants rounded.
+    """
+    # Build a mapping from each numeric atom to its rounded value.
+    mapping = {}
+    for num in expr.atoms(sym.Float):
+        # Round to the nearest multiple of 'accuracy'
+        rounded_value = accuracy * round(float(num) / accuracy)
+        mapping[num] = sym.Float(rounded_value)
+    
+    # Replace the numbers in the expression with their rounded versions.
+    return expr.xreplace(mapping)

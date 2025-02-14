@@ -6,6 +6,7 @@ from torch.nn.modules import activation
 from . import functions
 from .functions import separate_single_double_funcs
 import sympy as sp
+from .pretty_print import filter_expr2, round_expr
 
 
 class SymbolicLayer(nn.Module):
@@ -157,7 +158,7 @@ class SymbolicNetSimplified(nn.Module):
         """Return list of weight matrices as tensors"""
         return [i for i in self.parameters()]
 
-    def pretty_print(self, variable_names):
+    def pretty_print(self, variable_names, output_names, threshold=0.01, accuracy=0.01):
         """Print the symbolic computation as equations using SymPy."""
         
         assert len(variable_names) == self.in_dim, "Variable names must match input dimension"
@@ -172,7 +173,6 @@ class SymbolicNetSimplified(nn.Module):
             linear_input.append(1)  # Bias term
         
         # Single functions
-        breakpoint()
         for func in self.single_funcs_sympy:
             linear_input.extend([func(var) for var in symbols])
         
@@ -187,11 +187,14 @@ class SymbolicNetSimplified(nn.Module):
         for out_idx in range(self.out_dim):
             equation = sum(w * term for w, term in zip(weights[out_idx], linear_input))
             expr = sp.simplify(equation)
-            expr_list.append(expr)
-
-            # Print equations
-            if out_idx == 0:
-                print(f"Output {out_idx +1}: {expr}")
+            expr = filter_expr2(expr, threshold)
+            expr = round_expr(expr, accuracy)
+            # Incorporate the output name into the expression string
+            final_expr = f"logits_{output_names[out_idx]} = {str(expr)}"
+            expr_list.append(final_expr)
+            # Print the equation
+            print(f"Output {out_idx + 1}: {final_expr}")
+        return expr_list
         
 
 class SymbolicLayerL0(SymbolicLayer):

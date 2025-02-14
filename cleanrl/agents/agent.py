@@ -18,14 +18,33 @@ import copy
 
 from transform_data import oca_obj_to_cnn_coords
 
+def load_agent(class_name):
+    """
+    Return the agent class matching the given class name.
+    
+    Parameters:
+        class_name (str): The name of the agent class.
+        
+    Returns:
+        class: The agent class if found.
+        
+    Raises:
+        ValueError: If the class name is not found in the module.
+    """
+    agent_class = globals().get(class_name)
+    if agent_class is None:
+        raise ValueError(f"Agent class '{class_name}' not found in module '{__name__}'.")
+    return agent_class
+
 class Agent(nn.Module):
-    def __init__(self, envs, args,nnagent=None):
+    def __init__(self, envs, args,nnagent=None, agent_in_dim=None, skip_perception=False):
         super().__init__()
-        if args.gray:
+        if not skip_perception and args.gray:
             self.network = Normal_Cnn.OD_frames_gray2(args)
-        else:
+        elif not skip_perception:
             self.network = Normal_Cnn.OD_frames(args)
         self.args = args
+        self.skip_perception = skip_perception
         self.activation_funcs = [
             *[functions.Pow(2)] * 2 * args.n_funcs,
             *[functions.Pow(3)] * 2 *args.n_funcs,
@@ -36,18 +55,18 @@ class Agent(nn.Module):
         self.eql_actor = SymbolicNet(
             args.n_layers,
             funcs=self.activation_funcs,
-            in_dim=args.cnn_out_dim,
+            in_dim=agent_in_dim if self.skip_perception else args.cnn_out_dim,
             out_dim=envs.single_action_space.n)
         self.eql_inv_temperature = 10
         self.neural_actor = nn.Sequential(
-            nn.Linear(2048, 512),
+            nn.Linear(2048 if not self.skip_perception else agent_in_dim, 512),
             nn.ReLU(),
             nn.Linear(512, envs.single_action_space.n))
         self.critic = nn.Sequential(
-            nn.Linear(2048, 512),
+            nn.Linear(2048 if not self.skip_perception else agent_in_dim, 512),
             nn.ReLU(),
             nn.Linear(512, 1))
-        if args.load_cnn:
+        if not skip_perception and args.load_cnn:
             print('load cnn')
             self.network = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
         self.deter_action = args.deter_action
@@ -57,20 +76,26 @@ class Agent(nn.Module):
             self.network = copy.deepcopy(self.nnagent.network)
 
     def get_value(self, x):
-        hidden = self.network.encoder(x / 255.0)
+        if self.skip_perception:
+            batch_size = x.shape[0]
+            hidden = x.reshape(batch_size, -1) / 255.0
+        else:
+            hidden = self.network.encoder(x / 255.0)
         return self.critic(hidden)
 
-    def get_action_and_value(self, x, action=None, threshold=0.8, actor="neural", oca_obj=None):
-        hidden = self.network.encoder(x / 255.0)
+    def get_action_and_value(self, x, action=None, threshold=0.8, actor="neural"):
         if actor == "neural":
+            if self.skip_perception:
+                batch_size = x.shape[0]
+                hidden = x.reshape(batch_size, -1) / 255.0
+            else:
+                hidden = self.network.encoder(x / 255.0)
             logits = self.neural_actor(hidden) 
-        elif oca_obj == None:
-            coordinates = self.network(x / 255.0, threshold=threshold)
-            logits = self.eql_actor(coordinates) * self.eql_inv_temperature
         else:
             # Using ocatari object data instead of CNN coordinates for eql actor
-            coordinates = oca_obj_to_cnn_coords(oca_obj)
-            logits = self.eql_actor(coordinates) * self.eql_inv_temperature
+            batch_size = x.shape[0]
+            hidden = x.reshape(batch_size, -1) / 255.0
+            logits = self.eql_actor(hidden) * self.eql_inv_temperature
         
         dist = Categorical(logits=logits)
         if action is None:
@@ -78,6 +103,8 @@ class Agent(nn.Module):
         return action, dist.log_prob(action), dist.entropy(), self.critic(hidden), logits, dist.probs
     
     def get_pretrained_action_and_value(self, x, action=None):
+        if self.skip_perception:
+            raise NotImplementedError("When skip_perception is True, pretrained cannot be used (yet)")
         hidden = self.nnagent.network(x/255.0)
         logits_nn = self.nnagent.actor(hidden)
         probs_nn = Categorical(logits=logits_nn)
@@ -86,8 +113,8 @@ class Agent(nn.Module):
         return action, probs_nn.log_prob(action), probs_nn.entropy(), self.nnagent.critic(hidden),logits_nn,probs_nn.probs
 
 class AgentSimplified(Agent):
-    def __init__(self, envs, args,nnagent=None):
-        super().__init__(envs, args, nnagent)
+    def __init__(self, envs, args,nnagent=None, agent_in_dim=None, skip_perception=True):
+        super().__init__(envs, args, nnagent, agent_in_dim, skip_perception=skip_perception)
         self.activation_funcs = [
             functions.Pow(2),
             functions.Pow(3),
@@ -97,7 +124,7 @@ class AgentSimplified(Agent):
         # extend init
         self.eql_actor = SymbolicNetSimplified(
             funcs=self.activation_funcs,
-            in_dim=args.cnn_out_dim,
+            in_dim=agent_in_dim if self.skip_perception else args.cnn_out_dim,
             out_dim=envs.single_action_space.n)
 
 class AgentContinues(nn.Module):

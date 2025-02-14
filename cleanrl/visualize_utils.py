@@ -57,6 +57,30 @@ def visual_for_videos(envs, od_model, next_obs, device, args, run_name):
      images_to_video(input_path, output_path, fps)
      return
 
+def visual_for_ocatari_agent_videos(envs, agent, device, args, output_folder, n_step=200, actor="neural", label="test"):
+    output_path = os.path.join(output_folder, f"{actor}_{label}.mp4")
+    obs,_ = envs.reset()
+    obs = torch.Tensor(obs).to(device)
+    first_frame = envs.render()
+    height, width, channels = first_frame.shape
+
+    # Define the codec and create a VideoWriter object
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # or another codec like 'XVID'
+    fps = 20  # Adjust FPS as needed
+    video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+    for n in tqdm(range(n_step), desc="Shooting Video"): # The desc parameter is used to set the progress bar description
+        frame = envs.render()
+        # OpenCV uses BGR color order, so if your frame is RGB, convert it:
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        video_writer.write(frame_bgr)
+        action,_, _, _,_,_ = agent.get_action_and_value(obs, actor=actor, threshold=args.threshold)
+        obs, _, _, _, _ = envs.step(action.cpu().numpy())
+        obs = torch.Tensor(obs).to(device)
+
+    video_writer.release()
+    return output_path
+
 def visual_for_agent_videos(envs, agent, next_obs, device, args, run_name, n_step=200, threshold=0.8):
     print('save frames')
     os.makedirs(os.path.join('ppoeql_stack_cnn_out_frames', run_name), exist_ok=True)
@@ -66,7 +90,6 @@ def visual_for_agent_videos(envs, agent, next_obs, device, args, run_name, n_ste
     # Use tqdm in a loop
     next_obs, _ = envs.reset()
     next_obs = torch.Tensor(next_obs).to(device)
-    print(next_obs.shape)
     for n in tqdm(range(n_step), desc="Processing"): # The desc parameter is used to set the progress bar description
         with torch.no_grad():
             action, logprob, _, value,_,prob = agent.get_action_and_value(next_obs, threshold=threshold)
