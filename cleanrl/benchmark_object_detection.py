@@ -1,4 +1,5 @@
 import argparse
+from sklearn.metrics import mean_squared_error 
 import numpy as np
 import pandas as pd
 import json
@@ -8,6 +9,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--path", type=str, default="sam_track/assets/PongNoFrameskip-v4/PongNoFrameskip-v4_masks_test",
         help="file path to the directory holding the json files with the bounding box data")   
+    
+    parser.add_argument("--labels1", type=str, default='labels.json',
+        help="the file containing the first lables")
+    
+    parser.add_argument("--labels2", type=str, default='labels.json',
+        help="the file containing the second labels")
     args = parser.parse_args()
     return args
 
@@ -121,13 +128,40 @@ def compute_recall_precision_f1(df, iou_threshold=0.5):
 
     return precision, recall, f1_score
 
+def __get_center_coordinates(bounding_boxes):
+    center = []
+    for box in bounding_boxes:
+        center.append([np.mean([box[0][0], box[1][0]]), np.mean([box[0][1], box[1][1]])])
+    
+    return np.array(center)
+
+def __get_shape(bounding_boxes):
+    shape = []
+    for box in bounding_boxes:
+        shape.append([box[1][0] - box[0][0], box[1][1] - box[0][1]])
+
+    return np.array(shape)
+
+def compute_coordinate_loss(data, loss_fn=mean_squared_error, avg=True):
+    center1 = __get_center_coordinates(data['bounding_box1'])
+    center2 = __get_center_coordinates(data['bounding_box2'])
+    return loss_fn(center1, center2, multioutput='raw_values') if not avg else loss_fn(center1, center2)
+
+def compute_shape_loss(data, loss_fn=mean_squared_error, avg=True):
+    shape1 = __get_shape(data['bounding_box1'])
+    shape2 = __get_shape(data['bounding_box2'])
+    return loss_fn(shape1, shape2, multioutput='raw_values') if not avg else loss_fn(shape1, shape2)
 
 if __name__ == "__main__":
     args = parse_args()
-    data = parse_json_files(args.path + "/labels.json", args.path + "/labels.json")
+    data = parse_json_files(args.path + '/' + args.labels1, args.path + '/' + args.labels2)
     data = compute_iou(data)
     #print(data)
     precision, recall, f1_score = compute_recall_precision_f1(data)
     print(precision, recall, f1_score)
+
+    coordinate_loss = compute_coordinate_loss(data)
+    shape_loss = compute_shape_loss(data)
+    print(coordinate_loss, shape_loss)
 
     
