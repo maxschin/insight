@@ -336,6 +336,7 @@ if __name__ == '__main__':
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size,num_workers=num_workers, pin_memory=True, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size,num_workers=num_workers, pin_memory=True)
+
     if args.gray:
         model = OD_frames_gray2(args).to(device)
     else:

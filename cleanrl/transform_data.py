@@ -1,28 +1,63 @@
+import argparse
 import csv
 import re
 import json
 import numpy as np
 import torch
 
-# I am not sure that these are the correct dimensions of ocatari
-frame_width = 160
-frame_higth = 210
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--path", type=str, default="./sam_track/assets/Pong_input",
+        help="the path to the folder that contains both test and train datasets created with ocatari")
+    
+    parser.add_argument("--ocatari_labels_path", type=str, default="ocatari_labels_Pong_dqn.csv",
+        help="the path to the file that contains the ocatari labels for test and train data")
+    
+    parser.add_argument("--train_labels_path", type=str, default="Pong_input_masks_train/labels_ocatari.json",
+        help="the path where the file with the transformed ocatari train labels should be stored")
+
+    parser.add_argument("--test_labels_path", type=str, default="Pong_input_masks_test/labels_ocatari.json",
+        help="the path where the file with the transformed ocatari test labels should be stored")
+
+    parser.add_argument("--game", type=str, default="pong",
+        help="the game that was played necessary to read in the ocatari labels")
+
+    parser.add_argument("--ocatari_frame_width", type=int, default=160, 
+        help="the width of an image produced by ocatari")
+    
+    parser.add_argument("--ocatari_frame_height", type=int, default=210,
+        help="the height of an image produced by ocatari")
+
+    args = parser.parse_args()
+    return args
 
 def __normalize_frame_width(pos):
-    return pos/frame_width
+    return pos/args.ocatari_frame_width
 
 def __normalize_frame_hight(pos):
-    return pos/frame_higth
+    return pos/args.ocatari_frame_height
 
 def __array_to_int(arr):
     out = []
     for i in range(0, len(arr)):
         out.append(int(arr[i]))
     return out
+
+# the regex has to be adjusted for each game individually as the names of the enteties change
+def __ocatari_regex_pong(line):
+    # use regex to extract the data from the VIS column
+    enemy_score = re.findall(r"EnemyScore at \(.+?\), \(.+?\)", line['VIS'])
+    player_score = re.findall(r"PlayerScore at \(.+?\), \(.+?\)", line['VIS'])
+    enemy = re.findall(r"Enemy at \(.+?\), \(.+?\)", line['VIS'])
+    player = re.findall(r"Player at \(.+?\), \(.+?\)", line['VIS'])
+    ball = re.findall(r"Ball at \(.+?\), \(.+?\)", line['VIS'])
+
+    return [enemy_score, player_score, enemy, player, ball]
     
 # Loads the data from a file and extracts the position, size and existance from it
 # Must be adjusted for every new game
-def __load_ocatari_data(src):
+def __load_ocatari_data(src, game):
     table = csv.DictReader(open(src))
 
     frames = []
@@ -30,15 +65,11 @@ def __load_ocatari_data(src):
     # go through all lines in the csv file
     for line in table:
 
-        # use regex to extract the data from the VIS column
-        enemy_score = re.findall(r"EnemyScore at \(.+?\), \(.+?\)", line['VIS'])
-        player_score = re.findall(r"PlayerScore at \(.+?\), \(.+?\)", line['VIS'])
-        enemy = re.findall(r"Enemy at \(.+?\), \(.+?\)", line['VIS'])
-        player = re.findall(r"Player at \(.+?\), \(.+?\)", line['VIS'])
-        ball = re.findall(r"Ball at \(.+?\), \(.+?\)", line['VIS'])
-
-        # objects = [enemy_score[:1], player_score[:1], enemy[:1], player[:1], ball[:1]] # for some reason there are sometimes two score objects in the ocatari data
-        objects = [enemy_score, player_score, enemy, player, ball]
+        if game == "pong":
+            objects = __ocatari_regex_pong(line)
+        else:
+            print("this game is not yet supported")
+            return None
 
         # turn data to int and fill missing objects with placeholder data -1 and mark as non existend 0.6
         for i in range(0, len(objects)):
@@ -132,7 +163,7 @@ def __load_cnn_data(all_coord, all_shape, all_exist):
 
     return json.dumps(json_train), json.dumps(json_test)
 
-# transfrom data for one fram from CNN to fastsam
+# transfrom data for one fram from CNN format to fastsam format
 def __arrange_data_fastsam(coord, shape, exist):
     frame = {}
     i = 0
@@ -155,20 +186,31 @@ def __store_json(json, src):
     f.write(json)
 
 # loads ocatari labels from cvs file (src) and transforms it to the format the cnn uses
-def ocatari_to_cnn(src):
-    return __arrange_data_cnn(__load_ocatari_data(src))
+def ocatari_to_cnn(src, game):
+    return __arrange_data_cnn(__load_ocatari_data(src, game))
 
-def ocatari_to_fastsam(src, dst_train, dst_test):
-
-    print("transforming ocatari labels to fastsam lables")
-
-    all_coord, all_shape, all_exist = ocatari_to_cnn(src)
+# loads ocatari labels from csv file (src) and transforms it to the format fastsam uses (splits the labels in test and training labels)
+def ocatari_to_fastsam(src, dst_train, dst_test, game):
+    all_coord, all_shape, all_exist = ocatari_to_cnn(src, game)
 
     json_train, json_test = __load_cnn_data(all_coord, all_shape, all_exist)
     __store_json(json_train, dst_train)
     __store_json(json_test, dst_test)
 
-# programm here
-ocatari_to_fastsam('./sam_track/assets/Pong_input_masks/ocatari_labels_Pong_dqn.csv',
-               './sam_track/assets/Pong_input_masks/Pong_input_masks_train/ocatari_labels.json',
-               './sam_track/assets/Pong_input_masks/Pong_input_masks_test/ocatari_labels.json')
+# takes the output of the cnn and transforms it into the format fastsam uses
+def cnn_to_fastsam(coord, shape, exist, path):
+    json_labels = []
+
+    for i in range(0, len(coord)):
+        json_labels.append(__arrange_data_fastsam(coord[i], shape[i], exist[i]))
+    
+    print(path)
+    __store_json(json.dumps(json_labels), path)
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    ocatari_to_fastsam(args.path + '/' + args.ocatari_labels_path,
+                       args.path + '/' + args.train_labels_path,
+                       args.path + '/' + args.test_labels_path,
+                       args.game)
