@@ -1,9 +1,11 @@
-from transform_data import cnn_to_fastsam
 import numpy as np
 import argparse
 import torch
 import cv2
 import os
+
+from torch.utils.data import Dataset, DataLoader
+from transform_data import cnn_to_fastsam
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -24,49 +26,38 @@ def parse_args():
     return args
 
 
-def load_images(path, resolution):
-    images = []
+class AtariImageDataset(Dataset):
+    def __init__(self, path, resolution, resize=True):
+        self.images = []
 
-    i = 0
-    while os.path.exists(path + "/frame" + str(i) + ".png"):
+        i=0
+        while os.path.exists(path + "/frame" + str(i) + ".png"):
 
-        img = cv2.imread(path + "/frame" + str(i) + ".png")
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_AREA)
-        img = np.sum(np.multiply(img, np.array([0.2125, 0.7154, 0.0721])), axis=-1)
+            img = cv2.imread(path + "/frame" + str(i) + ".png")
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_AREA)
+            img = np.sum(np.multiply(img, np.array([0.2125, 0.7154, 0.0721])), axis=-1)
 
-        images.append(img/255)
+            self.images.append(img/255)
+            i+=1
 
-        i+=1
+        self.images = np.array(self.images)
 
-    images = np.array(images)
+    def __len__(self):
+        return len(self.images)
 
-    frames = []
-
-    for i in range(0, len(images)):
+    def __getitem__(self, idx):
         frame_stack = []
 
-        frame_stack.append(images[i])
-        frame_stack.append(images[(i+1) % len(images)])
-        frame_stack.append(images[(i+2) % len(images)])
-        frame_stack.append(images[(i+3) % len(images)])
+        frame_stack.append(self.images[idx])
+        frame_stack.append(self.images[(idx+1) % len(self.images)])
+        frame_stack.append(self.images[(idx+2) % len(self.images)])
+        frame_stack.append(self.images[(idx+3) % len(self.images)])
 
         # double wrapped because for training the cnn uses batches of 4 frames each for inference the batch size is 1
-        frame_stack = np.array(np.array([frame_stack]))
-        frames.append(frame_stack)
-
-    frames = np.array(frames)
-
-    return torch.Tensor(frames)
-
+        return torch.tensor(np.array(frame_stack))
 
 if __name__ == "__main__":
-
-    np.set_printoptions(threshold=np.inf)
-    np.set_printoptions(linewidth=np.inf)
-    np.set_printoptions(precision=6)
-    np.set_printoptions(suppress=True)
-
     args = parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -74,13 +65,15 @@ if __name__ == "__main__":
     model = torch.load('models/PongNoFrameskip-v4842_grayTrue_objs256_seed1_od_ocatari_600epochen_reordered.pkl', map_location=device)
     model.eval()
 
-    images = load_images(args.path, args.resolution)
+    img_data = AtariImageDataset(args.path, args.resolution)
+    img_dataloader = DataLoader(img_data, batch_size=1, shuffle=False)
 
     all_coords = []
     all_shapes = []
     all_exists = []
 
-    for img in images:
+    for img in img_dataloader:
+        
         img = img.to(device)
 
         pred_coord, pred_exist, pred_shape = model(img.float(), return_existence_logits=True, return_shape=True, clip_coordinates=False)
