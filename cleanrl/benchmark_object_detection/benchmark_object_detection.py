@@ -8,7 +8,7 @@ import sys
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--path", type=str, default="sam_track/assets/PongNoFrameskip-v4/PongNoFrameskip-v4_masks_test",
+    parser.add_argument("--path", type=str, default="../sam_track/assets/PongNoFrameskip-v4/PongNoFrameskip-v4_masks_test",
         help="file path to the directory holding the json files with the bounding box data")   
     
     parser.add_argument("--pred_labels", type=str, default='labels.json',
@@ -167,28 +167,34 @@ def compute_recall_precision_f1(df, iou_threshold=0.5):
 
     return precision, recall, f1_score
 
-def __get_center_coordinates(bounding_boxes):
-    center = []
-    for box in bounding_boxes:
-        center.append([np.mean([box[0][0], box[1][0]]), np.mean([box[0][1], box[1][1]])])
+def __get_center_coordinates(boxes1, boxes2):
+    center1 = []
+    center2 = []
+
+    for i in range(0, len(boxes1)):
+        if type(boxes1[i]) == tuple and type(boxes2[i]) == tuple:
+            center1.append([np.mean([boxes1[i][0][0], boxes1[i][1][0]]), np.mean([boxes1[i][0][1], boxes1[i][1][1]])])
+            center2.append([np.mean([boxes2[i][0][0], boxes2[i][1][0]]), np.mean([boxes2[i][0][1], boxes2[i][1][1]])])
     
-    return np.array(center)
+    return np.array(center1), np.array(center2)
 
-def __get_shape(bounding_boxes):
-    shape = []
-    for box in bounding_boxes:
-        shape.append([box[1][0] - box[0][0], box[1][1] - box[0][1]])
+def __get_shape(boxes1, boxes2):
+    shape1 = []
+    shape2 = []
 
-    return np.array(shape)
+    for i in range(0, len(boxes1)):
+        if type(boxes1[i]) == tuple and type(boxes2[i]) == tuple:
+            shape1.append([boxes1[i][1][0] - boxes1[i][0][0], boxes1[i][1][1], boxes1[i][0][1]])
+            shape2.append([boxes2[i][1][0] - boxes2[i][0][0], boxes2[i][1][1], boxes2[i][0][1]])
+    
+    return np.array(shape1), np.array(shape2)
 
 def compute_coordinate_loss(data, loss_fn=mean_squared_error, avg=True):
-    center1 = __get_center_coordinates(data['bounding_box1'])
-    center2 = __get_center_coordinates(data['bounding_box2'])
+    center1, center2 = __get_center_coordinates(data['bounding_box1'], data['bounding_box2'])
     return loss_fn(center1, center2, multioutput='raw_values') if not avg else loss_fn(center1, center2)
 
 def compute_shape_loss(data, loss_fn=mean_squared_error, avg=True):
-    shape1 = __get_shape(data['bounding_box1'])
-    shape2 = __get_shape(data['bounding_box2'])
+    shape1, shape2 = __get_shape(data['bounding_box1'], data['bounding_box2'])
     return loss_fn(shape1, shape2, multioutput='raw_values') if not avg else loss_fn(shape1, shape2)
 
 if __name__ == "__main__":

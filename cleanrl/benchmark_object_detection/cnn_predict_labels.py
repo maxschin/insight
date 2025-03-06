@@ -7,13 +7,18 @@ import os
 from torch.utils.data import Dataset, DataLoader
 from transform_data import cnn_to_fastsam
 
+import sys
+sys.path.append("../cleanrl")
+
+from agents.Normal_Cnn import OD_frames_gray2
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--model_path", type=str, default="models/PongNoFrameskip-v4842_grayTrue_objs256_seed1_od_ocatari_600epochen_reordered.pkl",
+    parser.add_argument("--model_path", type=str, default="../models/PongNoFrameskip-v4842_grayTrue_objs256_seed1_od_ocatari_600epochen_reordered.pkl",
         help="file path to the model used to predict labels")
 
-    parser.add_argument("--path", type=str, default="sam_track/assets/PongNoFrameskip-v4/PongNoFrameskip-v4_masks_test",
+    parser.add_argument("--path", type=str, default="../sam_track/assets/PongNoFrameskip-v4/PongNoFrameskip-v4_masks_test",
         help="file path to the directory holding the json files with the bounding box data")   
     
     parser.add_argument("--output", type=str, default="labels_cnn.json",
@@ -21,6 +26,12 @@ def parse_args():
 
     parser.add_argument("--resolution", type=int, default=84,
         help="the resolution of the images")
+    
+    parser.add_argument("--obj_vec_length", type=int, default=2,
+        help="obj vector length")
+    
+    parser.add_argument("--n_objects", type=int, default=256,
+        help="n_objects")
 
     args = parser.parse_args()
     return args
@@ -62,7 +73,8 @@ if __name__ == "__main__":
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model = torch.load('models/PongNoFrameskip-v4842_grayTrue_objs256_seed1_od_ocatari_600epochen_reordered.pkl', map_location=device)
+    model = torch.load(args.model_path, map_location=device)
+
     model.eval()
 
     img_data = AtariImageDataset(args.path, args.resolution)

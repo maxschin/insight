@@ -8,7 +8,7 @@ import torch
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--path", type=str, default="./sam_track/assets/Pong_input",
+    parser.add_argument("--path", type=str, default="../sam_track/assets/Pong_input",
         help="the path to the folder that contains both test and train datasets created with ocatari")
     
     parser.add_argument("--ocatari_labels_path", type=str, default="ocatari_labels_Pong_dqn.csv",
@@ -188,6 +188,36 @@ def __store_json(json, src):
 # loads ocatari labels from cvs file (src) and transforms it to the format the cnn uses
 def ocatari_to_cnn(src, game):
     return __arrange_data_cnn(__load_ocatari_data(src, game))
+
+
+def oca_obj_to_cnn_coords(oca_obj):
+    # Same as oca_obj_to_cnn_coords_old, just optimized by DeepSeek R1, which leads to dramatic performance improvements
+    # oca_obj shape: (256, 4, 5, 2, 2)
+    B = oca_obj.size(0)  # Batch size (256)
+    F_total, O_total = 4, 5  # Frames and objects
+    
+    # Extract positions and sizes, compute normalized centers
+    pos_x = oca_obj[..., 0, 0]  # (B, 4, 5)
+    size_x = oca_obj[..., 1, 0]
+    center_x = (pos_x + size_x / 2) / args.ocatari_frame_width  # Normalized x coordinates
+    
+    pos_y = oca_obj[..., 0, 1]
+    size_y = oca_obj[..., 1, 1]
+    center_y = (pos_y + size_y / 2) / args.ocatari_frame_height  # Normalized y coordinates
+    
+    # Precompute target indices for scattering
+    frames, objs = torch.arange(F_total, device=oca_obj.device), torch.arange(O_total, device=oca_obj.device)
+    F, O = torch.meshgrid(frames, objs, indexing='ij')
+    indices = (F * 512 + O * 2).unsqueeze(-1)  # Base indices for x
+    indices = torch.cat([indices, indices + 1], dim=-1).flatten()  # (40,) indices for x and y
+    
+    # Interleave x and y values and scatter into output tensor
+    values = torch.stack([center_x, center_y], dim=-1).view(B, -1)  # (256, 40)
+    
+    output = torch.zeros(B, 2048, device=oca_obj.device)
+    output.scatter_(dim=1, index=indices.expand(B, -1), src=values)
+    
+    return output
 
 # loads ocatari labels from csv file (src) and transforms it to the format fastsam uses (splits the labels in test and training labels)
 def ocatari_to_fastsam(src, dst_train, dst_test, game):
