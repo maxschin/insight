@@ -200,14 +200,17 @@ def compute_shape_loss(data, loss_fn=mean_squared_error, avg=True):
 if __name__ == "__main__":
     args = parse_args()
     data = parse_json_files(args.path + '/' + args.pred_labels, args.path + '/' + args.true_labels)
-    print(data)
-    print("iou mean", np.mean(data['iou']))
+    #print(data)
+    print("iou mean:", np.mean(data['iou']))
     #data.to_csv('benchmark_test.csv')
     precision, recall, f1_score = compute_recall_precision_f1(data)
-    print(precision, recall, f1_score)
+    print("precision:", precision) 
+    print("recall:", recall)
+    print("f1-score:", f1_score)
 
     coordinate_loss = compute_coordinate_loss(data)
     shape_loss = compute_shape_loss(data)
-    print(coordinate_loss, shape_loss)
+    print("coordinate-loss:", coordinate_loss) 
+    print("shape-loss:", shape_loss)
 
     
