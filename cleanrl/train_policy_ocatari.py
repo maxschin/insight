@@ -14,7 +14,6 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     ClipRewardEnv,
     EpisodicLifeEnv,
     FireResetEnv,
-    MaxAndSkipEnv,
     NoopResetEnv,
 )
 from agents.eql.regularization import L12Smooth
