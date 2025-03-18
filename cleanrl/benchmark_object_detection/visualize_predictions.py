@@ -68,7 +68,9 @@ def visualize_frame(img, data1, data2, resolution, file1, file2):
     if data2 is not None:
         plt.text(84, 10, file2, color='b')
 
-    for i in range(1,6):
+    # in pong there are only 6 objects, for general visualization the loop would have to run till 256 for performance reasons it is now only till 20
+    # 20 so it can still capture some errors of fastsam which sometimes labels objects with higher number
+    for i in range(1,20):
 
         # Object of number i might not exist
         try:
@@ -130,7 +132,10 @@ if __name__ == "__main__":
 
 
     if args.all_images:
-        for i in (0, len(data1)):
+        for i in range(0, len(data1)):
+
+            print((i/len(data1)) * 100)
+
             img = load_frame(args.path, i, args.resolution)
 
             if args.file2 is not None:
@@ -139,6 +144,8 @@ if __name__ == "__main__":
                 fig = visualize_frame(img, data1[i], None, args.resolution, args.file1, None)
 
             fig.savefig(args.output_path + "/frame" + str(i) + ".png")
+
+            plt.close(fig)
 
     else:
         if args.frame < 0:
@@ -157,6 +164,8 @@ if __name__ == "__main__":
             fig = visualize_frame(img, data1[frame], None, args.resolution, args.file1, None)
 
         fig.savefig(args.output_path + "/frame" + str(frame) + ".png")
+
+
 
     if args.video:
 
