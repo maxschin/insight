@@ -14,7 +14,7 @@ def reward_function(self) -> float:
         
     # Define categories for easy identification
     player = None
-    opponent = None
+    enemy = None
     ball = None
 
     # Classify objects by type
