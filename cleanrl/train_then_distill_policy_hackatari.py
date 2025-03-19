@@ -69,7 +69,6 @@ def linear_schedule(initial_value: float) -> Callable[[float], float]:
     return func
 
 if __name__ == "__main__":
-
     # handle args
     args = parse_args()
     # run name for mostly anything related to storage
@@ -94,7 +93,7 @@ if __name__ == "__main__":
     # parameters for training
     adam_step_size = 0.00025
     clipping_eps = 0.1
-    training_timesteps = 20_000_000 if containerized else 200
+    training_timesteps = 25_000_000 if containerized else 100
     verbose=0
 
     # for evaluation
@@ -109,7 +108,7 @@ if __name__ == "__main__":
     replay_priority_weight = 0.6
     reg_weight = 1e-3
     num_distillation_epochs = 200_000 if containerized else 3
-    batch_size = 128
+    batch_size = 1_000
 
     # for recording videos
     recording_timesteps = 1_000 if containerized else 10
@@ -221,7 +220,6 @@ if __name__ == "__main__":
 
     # create a summary writer to track loss
     writer = SummaryWriter(log_dir=model.logger.dir)
-    global_step = training_timesteps
 
     # collect samples for replay buffer
     prioritized_replay_buffer = PrioritizedReplayBuffer(capacity=replay_capacity, alpha=replay_priority_weight)
@@ -231,6 +229,7 @@ if __name__ == "__main__":
     print("Starting distillation phase...")
     progress_bar = tqdm(range(num_distillation_epochs), desc="Distillation phase", unit="epoch")
     for epoch in progress_bar:
+        breakpoint()
         # Sample a batch of observations from the environment.
         batch_obs, batch_teacher_probs, batch_weights, batch_indices = prioritized_replay_buffer.sample(batch_size)
         batch_obs, batch_teacher_probs, batch_weights = (
@@ -243,7 +242,8 @@ if __name__ == "__main__":
         _,_,_,_,_, student_probs = agent.get_action_and_value(batch_obs, actor="eql")
 
         # compute distillation (with importance-sampling correction) and regularization loss
-        per_sample_imitation_loss = F.kl_div(student_probs, batch_teacher_probs, reduction='none').sum(dim=1)
+        per_sample_imitation_loss = F.kl_div(torch.log(student_probs + 1e-8), batch_teacher_probs, reduction='none')
+        per_sample_imitation_loss = per_sample_imitation_loss.sum(dim=1)
         imitation_loss = (per_sample_imitation_loss * batch_weights).mean()
         reg_loss = regularization(agent.eql_actor.get_weights_tensor())
         loss = imitation_loss + reg_weight_now * reg_loss
@@ -257,10 +257,9 @@ if __name__ == "__main__":
         prioritized_replay_buffer.update_priorities(batch_indices, per_sample_imitation_loss.detach().cpu())
 
         # log values
-        writer.add_scalar("Distillation/Loss", loss.item(), global_step)
-        writer.add_scalar("Distillation/ImitationLoss", imitation_loss.item(), global_step)
-        writer.add_scalar("Distillation/RegLoss", loss.item(), global_step)
-        global_step += 1
+        writer.add_scalar("Distillation/Loss", loss.item(), epoch)
+        writer.add_scalar("Distillation/ImitationLoss", imitation_loss.item(), epoch)
+        writer.add_scalar("Distillation/RegLoss", loss.item(), epoch)
 
         # update rtpt
         if epoch % rtpt_frequency == 0:

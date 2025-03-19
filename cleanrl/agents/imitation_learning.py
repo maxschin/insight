@@ -71,7 +71,7 @@ def fill_replay_buffer(env, agent, buffer, device, target_size=10000):
             obs_tensor = torch.tensor(obs, dtype=torch.float32).to(device)
 
             # Get teacher's action probabilities for current observations
-            action ,_,_,_,_, teacher_probs = agent.get_action_and_value(obs_tensor, actor="eql")
+            action ,_,_,_,_, teacher_probs = agent.get_action_and_value(obs_tensor, actor="neural")
 
             teacher_probs = teacher_probs.cpu().numpy()
 

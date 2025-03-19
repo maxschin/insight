@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# Default Dockerfile
+DOCKERFILE="Dockerfile"
+
+# Process command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --all)
+            DOCKERFILE="Dockerfile.all"
+            ;;
+        *)
+            echo "Unknown parameter passed: $1"
+            exit 1
+            ;;
+    esac
+    shift
+done
+
 # Set the image name
 IMAGE_NAME="insight"
 
@@ -19,14 +36,23 @@ for DIR in "${MOUNT_DIRS[@]}"; do
     fi
 done
 
-# Build the image (directories inside the container will be overridden at runtime)
-echo "🚀 Building the image..."
-echo "Current directory: $(pwd)"
-podman build -t "$IMAGE_NAME" .
+# Check if GPUs are available
+if command -v nvidia-smi &> /dev/null; then
+    echo "GPUs detected. Enabling GPU support in container."
+    GPU_FLAG="--device nvidia.com/gpu=all"
+else
+    echo "No GPUs detected."
+    GPU_FLAG=""
+fi
 
-# Run the container with bind mounts
-echo "🔄 Running the container with mounted directories..."
-podman run --rm \
+# Build the image using the specified Dockerfile
+echo "🚀 Building the image using $DOCKERFILE..."
+echo "Current directory: $(pwd)"
+podman build -t "$IMAGE_NAME" -f "$DOCKERFILE" .
+
+# Run the container with bind mounts in detached mode, including GPU flags if available
+echo "🔄 Running the container with mounted directories in detached mode..."
+podman run --rm -d $GPU_FLAG \
     $(for DIR in "${MOUNT_DIRS[@]}"; do echo "-v $(pwd)/$DIR:/$DIR "; done) \
     "$IMAGE_NAME"
 

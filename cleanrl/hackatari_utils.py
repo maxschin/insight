@@ -30,7 +30,7 @@ def get_reward_func_path(game, reward_func_name):
     Build and validate the full file path for a reward function.
     
     The expected file structure is:
-        rewards/<game>/<reward_func_name>.py
+        reward_functions/<game>/<reward_func_name>.py
     
     Parameters:
         game (str): Name of the game directory under 'rewards'.
@@ -43,12 +43,15 @@ def get_reward_func_path(game, reward_func_name):
         ValueError: If the game or reward_func_name contains invalid characters.
         FileNotFoundError: If the game directory or reward function file does not exist.
     """
-    base_dir = "rewards"
+    base_dir = "reward_functions"
     
     # Validate that game and reward_func_name don't contain path separators
     for part, name in [(game, "game"), (reward_func_name, "reward_func_name")]:
         if os.path.sep in part or "/" in part or "\\" in part:
             raise ValueError(f"Invalid {name!r}. It should not contain path separators.")
+
+    # ensure lower case game
+    game = game.lower()
 
     # Construct the game directory path and validate it exists.
     game_path = os.path.join(base_dir, game)
