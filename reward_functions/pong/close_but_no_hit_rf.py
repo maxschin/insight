@@ -27,17 +27,6 @@ def reward_function(self) -> float:
             ball = obj
 
     if ball:
-# reward for scoring
-        if ball.x <= 0 and SCORING:
-            reward += 1.0
-            SCORING = True
-
-# reward for opponent scoring
-        if (ball.x + ball.w) >= SCREEN_WIDTH and not SCORING:
-            #reward = -1.0
-            SCORING = True
-
-# reward which is higher if the paddel is closer to the ball when it crosses
         if ball.x > player.x:
             ball_center_y = ball.y + ball.h / 2
             vertical_diff = abs(player.y - ball_center_y)
@@ -45,6 +34,9 @@ def reward_function(self) -> float:
             scale = 0.01
             alignment_reward = scale * max(0, (1 - (vertical_diff / MAX_VERTICAL_DIFF)))
             reward += alignment_reward
+
+        if (ball.x + ball.w >= player.x) and (ball.x <= player.x + player.w) and  (ball.y + ball.h >= player.y) and (ball.y <= player.y + player.h):
+            reward -= 0.8   # negative reward for hitting the ball
 
         if SCORING and (10 < ball.x < SCREEN_WIDTH - 10):
             SCORING = False
