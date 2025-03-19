@@ -8,6 +8,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     wget \
     git \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Miniconda
@@ -18,18 +22,25 @@ RUN wget -O /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-lat
 # Set Conda in PATH
 ENV PATH="/opt/conda/bin:$PATH"
 
+# Create and activate the Conda environment
+RUN conda create -n insight_core python=3.9 -y
+
+# Activate the environment and set it as default
+ENV CONDA_DEFAULT_ENV=insight_core
+ENV PATH="/opt/conda/envs/insight_core/bin:$PATH"
+
+# install opencv from source
+RUN conda install -c conda-forge opencv -y
+
+# Upgrade pip and install pip dependencies from requirements.txt
+COPY requirements.txt requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
 # Copy all contents of the working directory (adjust for exceptions later if needed)
 COPY . .
 
 # Set working directory
 WORKDIR .
-
-# Create and activate the Conda environment
-RUN conda env create -f environment.yml
-
-# Activate the environment and set it as default
-ENV CONDA_DEFAULT_ENV=insight_core
-ENV PATH="/opt/conda/envs/insight_core/bin:$PATH"
 
 # Set working directory to cleanrl
 WORKDIR /cleanrl

@@ -68,7 +68,7 @@ def visual_for_ocatari_agent_videos(envs, agent, device, args, output_folder, n_
     first_frame = envs.render()
     height, width, channels = first_frame.shape
 
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     fps = 20  
     video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 

@@ -42,14 +42,15 @@ def wrap_for_sb3(agent_class):
         def __init__(self, observation_space, action_space, lr_schedule, args, envs, **kwargs):
             # Initialize the base ActorCriticPolicy.
             super(ActorCriticSB3, self).__init__(observation_space, action_space, lr_schedule, **kwargs)
+
             # Create an instance of your Agent.
-            # Make sure to pass the required parameters (envs, args, etc.)
             n_actions = action_space.n
             agent_in_dim = observation_space.shape[0] * observation_space.shape[1] # buffer win size * neuro-sympbolic out_dims
             self.agent = agent_class(args, n_actions=n_actions, agent_in_dim=agent_in_dim)
-            
-            # (Optional) If you want to initialize weights or adjust any parts,
-            # you can do so here.
+
+            # manually add agent to optimizer
+            self.add_module("agent", self.agent)
+            self.optimizer.add_param_group({"params": self.agent.parameters()})
 
         def forward(self, obs, deterministic=False):
             """

@@ -1,7 +1,6 @@
 import os
 import argparse
 import gymnasium as gym
-from gym.wrappers.record_video import RecordVideo
 from stable_baselines3.common.atari_wrappers import (  # isort:skip
     ClipRewardEnv,
     EpisodicLifeEnv,
@@ -14,6 +13,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3 import PPO
 from typing import Callable
 import torch
+from torch.nn.modules import container
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils import tensorboard
@@ -57,8 +57,8 @@ def parse_args():
 def make_env(env_name, seed, rewardfunc_path, modifs, index, is_eval=False, video_folder=None):
     def thunk():
         env = HackAtariWrapper(env_name, modifs=modifs, rewardfunc_path=rewardfunc_path)  
-        env.seed(seed)
         env = Monitor(env)
+        env.reset(seed=seed)
         return env
 
     return thunk
@@ -84,28 +84,38 @@ if __name__ == "__main__":
     args.n_funcs, args.n_layers, args.deter_action = 0,0, False # meaningless
 
     ########### DEFINE HYPERPARAMS ###########################
+    # check if running inside container
+    containerized = os.environ.get("container") == "podman"
+    if containerized:
+        print("Running inside container")
+    else:
+        print("Running locally")
+
     # parameters for training
     adam_step_size = 0.00025
     clipping_eps = 0.1
-    training_timesteps = 100_000 // 2
+    training_timesteps = 20_000_000 if containerized else 200
     verbose=0
 
     # for evaluation
     n_cores = len(os.sched_getaffinity(0))
     args.num_envs = n_cores
-    print(f"Running on: {n_cores}")
+    print(f"Running on: {n_cores} cores")
     n_eval_episodes = args.num_envs // 2 
-    eval_frequency = 50_000
+    eval_frequency = 500_000 if containerized else 50
 
     # params for distillation
-    replay_capacity = 100_000 // 2
+    replay_capacity = 1_000_000 if containerized else 50
     replay_priority_weight = 0.6
     reg_weight = 1e-3
-    num_distillation_epochs = 10_000
+    num_distillation_epochs = 200_000 if containerized else 3
     batch_size = 128
 
+    # for recording videos
+    recording_timesteps = 1_000 if containerized else 10
+
     # rtpt
-    rtpt_frequency = 10_000
+    rtpt_frequency = 10_000 if containerized else 10
 
     ##########################################################
 
@@ -210,7 +220,7 @@ if __name__ == "__main__":
     reg_weight_now = reg_weight
 
     # create a summary writer to track loss
-    writer = SummaryWriter(log_dir=tensorboard_log_dir)
+    writer = SummaryWriter(log_dir=model.logger.dir)
     global_step = training_timesteps
 
     # collect samples for replay buffer
@@ -249,7 +259,7 @@ if __name__ == "__main__":
         # log values
         writer.add_scalar("Distillation/Loss", loss.item(), global_step)
         writer.add_scalar("Distillation/ImitationLoss", imitation_loss.item(), global_step)
-        writer.add_scalar("Distillation/RegLoss", loss.item(), reg_loss)
+        writer.add_scalar("Distillation/RegLoss", loss.item(), global_step)
         global_step += 1
 
         # update rtpt
@@ -260,20 +270,23 @@ if __name__ == "__main__":
         reg_weight_now = (epoch / num_distillation_epochs) * reg_weight
 
     # save equations
+    print("Saving equations...")
     variable_names = env.env_method("get_variable_names", indices=[0])[0]
     output_names = env.env_method("get_action_names", indices=[0])[0]
     equation_list = agent.eql_actor.pretty_print(variable_names, output_names)
     save_equations(equation_list, equations_folder, run_name)
 
     # save agent
+    print("Saving checkpoint...")
     ckpt_path = os.path.join(ckpt_dir, f"{run_name}_final.pth")
     torch.save(agent, ckpt_path)
     
     # record eql and neural agent
-    visual_for_ocatari_agent_videos(env_eval, agent, device, args, record_folder, actor="eql", n_step=10000, label="final")
-    visual_for_ocatari_agent_videos(env_eval, agent, device, args, record_folder, actor="neural", n_step=10000, label="final")
+    print("Recording agents...")
+    visual_for_ocatari_agent_videos(env_eval, agent, device, args, record_folder, actor="eql", n_step=recording_timesteps, label="final")
+    visual_for_ocatari_agent_videos(env_eval, agent, device, args, record_folder, actor="neural", n_step=recording_timesteps, label="final")
 
     writer.close()
-    print(run_name)
+    print(f"Finished run: {run_name}")
 
 

@@ -7,7 +7,7 @@ IMAGE_NAME="insight"
 MOUNT_DIRS=(
     "cleanrl/runs"
     "cleanrl/equations"
-    "cleanrl/agents"
+    "cleanrl/models"
     "cleanrl/ppoeql_ocatari_videos"
 )
 
