@@ -1,10 +1,11 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import io
 import cv2
 import json
 import argparse
 import random
+
+from time import sleep
 
 from PIL import Image
 
@@ -13,7 +14,6 @@ def parse_args():
 
     parser.add_argument("--path", type=str, default="../sam_track/assets/PongNoFrameskip-v4/PongNoFrameskip-v4_masks_test",
         help="file path to the directory holding the json files with the bounding box data")   
-
 
     parser.add_argument("--file1", type=str, default="labels.json",
         help="file path to the first json file with the results to be visualized")
@@ -134,7 +134,7 @@ if __name__ == "__main__":
     if args.all_images:
         for i in range(0, len(data1)):
 
-            print((i/len(data1)) * 100)
+            print("state: {0:7.3f}%".format((i/len(data1)) * 100), end='\r')
 
             img = load_frame(args.path, i, args.resolution)
 
@@ -175,7 +175,7 @@ if __name__ == "__main__":
 
         for i in range(0, len(data1)):
 
-            print((i/len(data1)) * 100)
+            print("state: {0:7.3f}%".format((i/len(data1)) * 100), end='\r')
 
             img = load_frame(args.path, i, args.resolution)
         
