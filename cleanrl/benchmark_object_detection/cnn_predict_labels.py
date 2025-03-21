@@ -44,6 +44,8 @@ class AtariImageDataset(Dataset):
         i=0
         while os.path.exists(path + "/frame" + str(i) + ".png"):
 
+            print("state: {0:7d} entries".format(i), end='\r')
+
             img = cv2.imread(path + "/frame" + str(i) + ".png")
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_AREA)
@@ -84,7 +86,9 @@ if __name__ == "__main__":
     all_shapes = []
     all_exists = []
 
-    for img in img_dataloader:
+    for i, img in enumerate(img_dataloader):
+
+        print("state: {0:7.3f}%".format((i/len(img_dataloader)) * 100), "{:<10}".format(""), end='\r')
         
         img = img.to(device)
 
