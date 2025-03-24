@@ -241,7 +241,7 @@ def shape_error(path_pred_labels, path_true_labels, loss_fn=mean_squared_error, 
 if __name__ == "__main__":
     args = parse_args()
     data = parse_json_files(args.path + '/' + args.pred_labels, args.path + '/' + args.true_labels)
-    #print(data)
+    
     print("iou mean:", np.mean(data['iou']))
     #data.to_csv('benchmark_test.csv')
     precision, recall, f1_score = compute_recall_precision_f1(data)
