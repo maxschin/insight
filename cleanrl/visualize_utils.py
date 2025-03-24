@@ -59,23 +59,32 @@ def visual_for_videos(envs, od_model, next_obs, device, args, run_name):
 
 def visual_for_ocatari_agent_videos(envs, agent, device, args, output_folder, n_step=200, actor="neural", label="test"):
     output_path = os.path.join(output_folder, f"{actor}_{label}.mp4")
-    obs,_ = envs.reset()
+    
+    # Handle different Gym API versions
+    result = envs.reset()
+    obs = result[0] if isinstance(result, tuple) else result
     obs = torch.Tensor(obs).to(device)
+
     first_frame = envs.render()
     height, width, channels = first_frame.shape
 
-    # Define the codec and create a VideoWriter object
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # or another codec like 'XVID'
-    fps = 20  # Adjust FPS as needed
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fps = 20  
     video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-    for n in tqdm(range(n_step), desc="Shooting Video"): # The desc parameter is used to set the progress bar description
+    for n in tqdm(range(n_step), desc="Shooting Video"):
         frame = envs.render()
-        # OpenCV uses BGR color order, so if your frame is RGB, convert it:
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         video_writer.write(frame_bgr)
-        action,_, _, _,_,_ = agent.get_action_and_value(obs, actor=actor, threshold=args.threshold)
-        obs, _, _, _, _ = envs.step(action.cpu().numpy())
+
+        action, _, _, _, _, _ = agent.get_action_and_value(obs, actor=actor)
+        obs_result = envs.step(action.cpu().numpy())
+
+        if isinstance(obs_result, tuple):  # Ensure unpacking matches return structure
+            obs = obs_result[0]  # Extract only the observation
+        else:
+            obs = obs_result
+
         obs = torch.Tensor(obs).to(device)
 
     video_writer.release()

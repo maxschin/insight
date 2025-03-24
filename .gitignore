@@ -10,3 +10,5 @@ cleanrl/stack_cnn_out_frames/
 #!cleanrl/sam_track/benchmark_fsam.qmd
 cleanrl/sam_track/assets/*.mp4
 .gitignore*.pyc
+*.mp4
+cleanrl/benchmark_object_detection/images

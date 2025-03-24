@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from stable_baselines3.common.policies import ActorCriticPolicy
 import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
@@ -16,9 +17,7 @@ from .eql.symbolic_network import SymbolicNet, SymbolicNetSimplified
 
 import copy
 
-from transform_data import oca_obj_to_cnn_coords
-
-def load_agent(class_name):
+def load_agent(class_name, for_sb3=False):
     """
     Return the agent class matching the given class name.
     
@@ -34,10 +33,64 @@ def load_agent(class_name):
     agent_class = globals().get(class_name)
     if agent_class is None:
         raise ValueError(f"Agent class '{class_name}' not found in module '{__name__}'.")
+    if for_sb3:
+        agent_class = wrap_for_sb3(agent_class)
     return agent_class
 
+def wrap_for_sb3(agent_class):
+    class ActorCriticSB3(ActorCriticPolicy):
+        def __init__(self, observation_space, action_space, lr_schedule, args, envs, **kwargs):
+            # Initialize the base ActorCriticPolicy.
+            super(ActorCriticSB3, self).__init__(observation_space, action_space, lr_schedule, **kwargs)
+
+            # Create an instance of your Agent.
+            n_actions = action_space.n
+            agent_in_dim = observation_space.shape[0] * observation_space.shape[1] # buffer win size * neuro-sympbolic out_dims
+            self.agent = agent_class(args, n_actions=n_actions, agent_in_dim=agent_in_dim)
+
+            # manually add agent to optimizer
+            self.add_module("agent", self.agent)
+            self.optimizer.add_param_group({"params": self.agent.parameters()})
+
+        def forward(self, obs, deterministic=False):
+            """
+            Given an observation, obtain an action, value estimate, and log probability.
+            """
+            # Forward pass through your agent. The get_action_and_value returns:
+            # (action, log_prob, entropy, value, logits, probs)
+            action, log_prob, entropy, value, logits, probs = self.agent.get_action_and_value(obs)
+            if deterministic:
+                # Choose the most probable action
+                action = torch.argmax(probs, dim=1)
+            return action, value, log_prob
+
+        def _predict(self, observation, deterministic=False):
+            """
+            Returns the action to take given the observation.
+            This method is used when sampling actions in the environment.
+            """
+            action, _, _ = self.forward(observation, deterministic)
+            return action
+
+        def evaluate_actions(self, obs, actions):
+            """
+            Evaluate given actions. This method is used during training to calculate
+            log probabilities and entropy for the selected actions.
+            """
+            # Pass the observation and the given actions to get the corresponding outputs.
+            # The agent’s get_action_and_value accepts an action argument.
+            _, log_prob, entropy, value, logits, probs = self.agent.get_action_and_value(obs, action=actions)
+            return value, log_prob, entropy
+    return ActorCriticSB3
+
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+        torch.nn.init.orthogonal_(layer.weight, std)
+        torch.nn.init.constant_(layer.bias, bias_const)
+        return layer
+
 class Agent(nn.Module):
-    def __init__(self, envs, args,nnagent=None, agent_in_dim=None, skip_perception=False):
+    def __init__(self, args,nnagent=None, agent_in_dim=None, skip_perception=False, n_funcs=4, n_actions=6):
         super().__init__()
         if not skip_perception and args.gray:
             self.network = Normal_Cnn.OD_frames_gray2(args)
@@ -46,22 +99,22 @@ class Agent(nn.Module):
         self.args = args
         self.skip_perception = skip_perception
         self.activation_funcs = [
-            *[functions.Pow(2)] * 2 * args.n_funcs,
-            *[functions.Pow(3)] * 2 *args.n_funcs,
-            *[functions.Constant()] * 2 * args.n_funcs,
-            *[functions.Identity()] * 2 * args.n_funcs,
-            *[functions.Product()] * 2 * args.n_funcs,
-            *[functions.Add()] * 2 * args.n_funcs,]
+            *[functions.Pow(2)] * 2 * n_funcs,
+            *[functions.Pow(3)] * 2 * n_funcs,
+            *[functions.Constant()] * 2 * n_funcs,
+            *[functions.Identity()] * 2 * n_funcs,
+            *[functions.Product()] * 2 * n_funcs,
+            *[functions.Add()] * 2 * n_funcs,]
         self.eql_actor = SymbolicNet(
             args.n_layers,
             funcs=self.activation_funcs,
             in_dim=agent_in_dim if self.skip_perception else args.cnn_out_dim,
-            out_dim=envs.single_action_space.n)
+            out_dim=n_actions)
         self.eql_inv_temperature = 10
         self.neural_actor = nn.Sequential(
             nn.Linear(2048 if not self.skip_perception else agent_in_dim, 512),
             nn.ReLU(),
-            nn.Linear(512, envs.single_action_space.n))
+            nn.Linear(512, n_actions))
         self.critic = nn.Sequential(
             nn.Linear(2048 if not self.skip_perception else agent_in_dim, 512),
             nn.ReLU(),
@@ -112,9 +165,10 @@ class Agent(nn.Module):
             action = probs_nn.sample()
         return action, probs_nn.log_prob(action), probs_nn.entropy(), self.nnagent.critic(hidden),logits_nn,probs_nn.probs
 
+
 class AgentSimplified(Agent):
-    def __init__(self, envs, args,nnagent=None, agent_in_dim=None, skip_perception=True):
-        super().__init__(envs, args, nnagent, agent_in_dim, skip_perception=skip_perception)
+    def __init__(self, args, n_actions, nnagent=None, agent_in_dim=None, skip_perception=True):
+        super().__init__(args, nnagent, agent_in_dim, skip_perception=skip_perception, n_actions=n_actions)
         self.activation_funcs = [
             functions.Pow(2),
             functions.Pow(3),
@@ -125,7 +179,39 @@ class AgentSimplified(Agent):
         self.eql_actor = SymbolicNetSimplified(
             funcs=self.activation_funcs,
             in_dim=agent_in_dim if self.skip_perception else args.cnn_out_dim,
-            out_dim=envs.single_action_space.n)
+            out_dim=n_actions)
+
+        self.network = nn.Sequential(
+            layer_init(nn.Linear(agent_in_dim, 128)),
+            nn.ReLU(),
+            layer_init(nn.Linear(128, 64)),
+            nn.ReLU(),
+            layer_init(nn.Linear(64, 32)),
+            nn.ReLU(),
+        )
+        self.neural_actor = layer_init(
+            nn.Linear(32, n_actions), std=0.01)
+        self.critic = layer_init(nn.Linear(32, 1), std=1) 
+
+    def get_value(self, x):
+        batch_size = x.shape[0]
+        reshaped = x.reshape(batch_size, -1) / 255.0
+        hidden = self.network(reshaped)
+        return self.critic(hidden)
+
+    def get_action_and_value(self, x, action=None, threshold=0.8, actor="neural"):
+        batch_size = x.shape[0]
+        reshaped = x.reshape(batch_size, -1) / 255.0
+        hidden = self.network(reshaped)
+        if actor == "neural":
+            logits = self.neural_actor(hidden) 
+        else:
+            logits = self.eql_actor(reshaped) * self.eql_inv_temperature
+        dist = Categorical(logits=logits)
+        if action is None:
+            action = dist.sample()
+        return action, dist.log_prob(action), dist.entropy(), self.critic(hidden), logits, dist.probs
+
 
 class AgentContinues(nn.Module):
     def __init__(self, envs, args,nnagent=None):

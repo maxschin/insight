@@ -20,7 +20,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 )
 from itertools import chain
 from agents.eql.regularization import L12Smooth
-from agents.agent import Agent
+from agents.agent import Agent, AgentSimplified
 import matplotlib.pyplot as plt
 
 #dataset
@@ -36,6 +36,7 @@ from visualize_utils import visual_for_videos,visual, visual_for_agent_videos
 from tqdm import tqdm
 import itertools
 import sympy as sy
+from agents.eql import pretty_print
 
 def parse_args():
     # fmt: off
@@ -166,6 +167,7 @@ def parse_args():
     args.cnn_out_dim = args.n_objects*args.obj_vec_length*4
     # fmt: on
     return args
+    
 
 
 def make_env(env_id, seed, idx, capture_video, run_name,args):
@@ -295,7 +297,19 @@ if __name__ == "__main__":
         if args.cover_cnn:
             agent.network = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
     else:
-        agent = Agent(envs,args).to(device)
+        agent = AgentSimplified(envs,args).to(device)
+    #eql
+    
+    var_names = [f"var_name_{i}" for i in range(args.cnn_out_dim)]
+    print("equations")
+    agent.eql_actor.pretty_print(var_names)
+    class ActionSpace:
+        def __init__(self, n):
+            self.n = n
+
+    class MyObject:
+        def __init__(self, n):
+            self.single_action_space = ActionSpace(n)
 
     #fix hypara
     if args.fix_cnn:
@@ -348,6 +362,7 @@ if __name__ == "__main__":
 
     with tqdm(total=num_updates, desc="Training Progress") as pbar:
         for update in range(1, num_updates + 1):
+            breakpoint()
             u_rate = update/num_updates
             if update%int(num_updates/100) ==0 or update==1:
                 acc = 0
@@ -571,11 +586,11 @@ if __name__ == "__main__":
     if args.save:
         torch.save(agent, 'models/agents/'+run_name+'.pth')
     #eql
-    '''if args.eql:
-        with torch.no_grad():
-            expra = pretty_print.network(agent.actor.get_weights(), agent.activation_funcs, var_names[:args.cnn_out_dim])
-            for i in range(envs.single_action_space.n):
-                print(f"action{i}:")
-                sy.pprint(sy.simplify(expra[i]))'''
+    #var_names = [f"var_name_{i}" for i in range(args.cnn_out_dim)]
+    #with torch.no_grad():
+    #    expra = pretty_print.network(agent.eql_actor.get_weights(), agent.activation_funcs, var_names[:args.cnn_out_dim])
+    #    for i in range(envs.single_action_space.n):
+    #        print(f"action{i}:")
+    #        sy.pprint(sy.simplify(expra[i]))
     envs.close()
     writer.close()

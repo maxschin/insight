@@ -1,0 +1,49 @@
+# Use Ubuntu 24.04 as the base image
+FROM ubuntu:24.04
+
+# Set non-interactive mode for apt to avoid prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install necessary dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    git \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Miniconda
+RUN wget -O /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    bash /tmp/miniconda.sh -b -p /opt/conda && \
+    rm /tmp/miniconda.sh
+
+# Set Conda in PATH
+ENV PATH="/opt/conda/bin:$PATH"
+
+# Create and activate the Conda environment
+RUN conda create -n insight_core python=3.9 -y
+
+# Activate the environment and set it as default
+ENV CONDA_DEFAULT_ENV=insight_core
+ENV PATH="/opt/conda/envs/insight_core/bin:$PATH"
+
+# install opencv from source
+RUN conda install -c conda-forge opencv -y
+
+# Upgrade pip and install pip dependencies from requirements.txt
+COPY requirements.txt requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# Copy all contents of the working directory (adjust for exceptions later if needed)
+COPY . .
+
+# Set working directory
+WORKDIR .
+
+# Set working directory to cleanrl
+WORKDIR /cleanrl
+
+# Run the Python script
+CMD ["python", "train_then_distill_policy_hackatari.py"]

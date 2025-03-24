@@ -42,7 +42,7 @@ def parse_args():
         help="lr")
     parser.add_argument("--torch-deterministic", type=bool, default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--track", type=bool, default=True,
+    parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=True,
         help="if toggled, this experiment will be tracked with Weights and Biases")
     parser.add_argument("--wandb-project-name", type=str, default="Train_CNN",
         help="the wandb's project name")

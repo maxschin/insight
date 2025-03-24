@@ -1,6 +1,7 @@
 from hackatari import HackAtari
 from ocatari.ram.extract_ram_info import get_object_state_size
 from gymnasium.vector import SyncVectorEnv
+from stable_baselines3.common.env_checker import check_env
 
 
 class HackAtariWrapper(HackAtari):
@@ -45,6 +46,11 @@ class SyncVectorEnvWrapper(SyncVectorEnv):
     def render(self, *args, **kwargs):
         return self.envs[0].render(*args, **kwargs)
 
+
+if __name__ == "__main__":
+    env = HackAtariWrapper("Pong")
+    breakpoint()
+    check_env(env)
 
 
 
