@@ -53,7 +53,7 @@ def __ocatari_regex_pong(line):
     player = re.findall(r"Player at \(.+?\), \(.+?\)", line['VIS'])
     ball = re.findall(r"Ball at \(.+?\), \(.+?\)", line['VIS'])
 
-    return [enemy_score, player_score, enemy, player, ball]
+    return [enemy_score, player_score, ball, enemy, player]
     
 # Loads the data from a file and extracts the position, size and existance from it
 # Must be adjusted for every new game
