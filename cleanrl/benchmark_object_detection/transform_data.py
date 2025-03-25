@@ -5,6 +5,8 @@ import json
 import numpy as np
 import torch
 
+PONG_OBJECT_ORDER = {0: "enemy_score", 1: "player_score", 2: "enemy", 3: "player", 4: "ball"}
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
@@ -47,23 +49,30 @@ def __array_to_int(arr):
 # the regex has to be adjusted for each game individually as the names of the enteties change
 def __ocatari_regex_pong(line):
     # use regex to extract the data from the VIS column
+
     enemy_score = re.findall(r"EnemyScore at \(.+?\), \(.+?\)", line['VIS'])
     player_score = re.findall(r"PlayerScore at \(.+?\), \(.+?\)", line['VIS'])
     enemy = re.findall(r"Enemy at \(.+?\), \(.+?\)", line['VIS'])
     player = re.findall(r"Player at \(.+?\), \(.+?\)", line['VIS'])
     ball = re.findall(r"Ball at \(.+?\), \(.+?\)", line['VIS'])
 
-    return [enemy_score, player_score, ball, enemy, player]
+    pong_objs = {"enemy_score": enemy_score, "player_score": player_score, "enemy": enemy, "player": player, "ball": ball}
+
+    return [pong_objs[PONG_OBJECT_ORDER[0]], pong_objs[PONG_OBJECT_ORDER[1]], pong_objs[PONG_OBJECT_ORDER[2]], 
+            pong_objs[PONG_OBJECT_ORDER[3]], pong_objs[PONG_OBJECT_ORDER[4]]]
     
 # Loads the data from a file and extracts the position, size and existance from it
 # Must be adjusted for every new game
 def __load_ocatari_data(src, game):
     table = csv.DictReader(open(src))
+    rows = list(table)
 
     frames = []
     
     # go through all lines in the csv file
-    for line in table:
+    for j, line in enumerate(rows):
+
+        print("state: {0:7.3f}%".format((j/len(rows)) * 100), "{:<10}".format(""), end='\r')
 
         if game == "pong":
             objects = __ocatari_regex_pong(line)
@@ -109,6 +118,9 @@ def __arrange_data_cnn(frames):
 
     # since the lookahead is 4 the last 4 frames are not looked at.
     for i in range(0, len(frames)-4):
+
+        print("state: {0:7.3f}%".format((i/(len(frames)-4)) * 100), "{:<10}".format(""), end='\r')
+
         coord = np.zeros(2048)
         shape = np.zeros(2048)
         exist = np.zeros(1024)

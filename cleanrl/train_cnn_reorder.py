@@ -70,6 +70,13 @@ def parse_args():
         help="resume from existing ckpt.")
     parser.add_argument("--run-name", type=str, default=None,
         help="the defined run_name")
+    
+    parser.add_argument("--train_path", type=str, default="./sam_track/assets/Pong_input/Pong_input_masks_train")
+    parser.add_argument("--train_labels", type=str, default="labels_ocatari.json")
+
+    parser.add_argument("--test_path", type=str, default="./sam_track/assets/Pong_input/Pong_input_masks_test")
+    parser.add_argument("--test_labels", type=str, default="labels_ocatari.json")
+    
     parser.add_argument("--coordinate_loss", type=str, default="l1")
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--threshold", type=float, default=0.5)
@@ -321,11 +328,11 @@ if __name__ == '__main__':
     # images_dir_test = os.path.join(asset_dir, f'{args.env_id}'+'_masks_test')
     # labels_test = os.path.join(images_dir_test, 'labels.json')
 
-    images_dir = './sam_track/assets/pong_fastsam/PongNoFrameskip-v4_masks_train'
-    labels = './sam_track/assets/pong_fastsam/PongNoFrameskip-v4_masks_train/labels.json'
+    images_dir = args.train_path
+    labels = args.train_path + '/' + args.train_labels
 
-    images_dir_test = './sam_track/assets/pong_ocatari/Pong_input_masks_test'
-    labels_test = './sam_track/assets/pong_ocatari/Pong_input_masks_test/ocatari_labels.json'
+    images_dir_test = args.test_path
+    labels_test = args.test_path + '/' + args.test_labels
 
     batch_size = args.batch_size
 
