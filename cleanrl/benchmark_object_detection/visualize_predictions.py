@@ -63,10 +63,12 @@ def visualize_frame(img, data1, data2, resolution, file1, file2):
 
     plt.imshow(img, cmap="gray")
 
-    plt.text(84, 5, file1, color='r')
+    plt.text(0, -5, file1.split('.')[0], color='r')
+    # plt.text(0, -5, "labels_fastsam", color='r')
+
 
     if data2 is not None:
-        plt.text(84, 10, file2, color='b')
+        plt.text(42, -5, file2.split('.')[0], color='b')
 
     # in pong there are only 6 objects, for general visualization the loop would have to run till 256 for performance reasons it is now only till 20
     # 20 so it can still capture some errors of fastsam which sometimes labels objects with higher number

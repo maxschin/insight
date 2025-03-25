@@ -16,6 +16,9 @@ def parse_args():
     
     parser.add_argument("--true_labels", type=str, default='labels.json',
         help="the file containing the second labels")
+    
+    parser.add_argument("--obj", type=int, default=-1,
+        help="The object for witch the loss should be calculated -1 means avaerage over all objects")
     args = parser.parse_args()
     return args
 
@@ -167,40 +170,78 @@ def compute_recall_precision_f1(df, iou_threshold=0.5):
 
     return precision, recall, f1_score
 
-def __get_center_coordinates(boxes1, boxes2):
-    center1 = []
-    center2 = []
+def coordinate_error(path_pred_labels, path_true_labels, loss_fn=mean_squared_error, obj=0):
+    file_pred = open(args.path + '/' + path_pred_labels)
+    file_ture = open(args.path + '/' + path_true_labels)
 
-    for i in range(0, len(boxes1)):
-        if type(boxes1[i]) == tuple and type(boxes2[i]) == tuple:
-            center1.append([np.mean([boxes1[i][0][0], boxes1[i][1][0]]), np.mean([boxes1[i][0][1], boxes1[i][1][1]])])
-            center2.append([np.mean([boxes2[i][0][0], boxes2[i][1][0]]), np.mean([boxes2[i][0][1], boxes2[i][1][1]])])
-    
-    return np.array(center1), np.array(center2)
+    data_pred = json.load(file_pred)
+    data_true = json.load(file_ture)
 
-def __get_shape(boxes1, boxes2):
-    shape1 = []
-    shape2 = []
+    center_pred = []
+    center_true = []
 
-    for i in range(0, len(boxes1)):
-        if type(boxes1[i]) == tuple and type(boxes2[i]) == tuple:
-            shape1.append([boxes1[i][1][0] - boxes1[i][0][0], boxes1[i][1][1], boxes1[i][0][1]])
-            shape2.append([boxes2[i][1][0] - boxes2[i][0][0], boxes2[i][1][1], boxes2[i][0][1]])
-    
-    return np.array(shape1), np.array(shape2)
+    frame_map = []
 
-def compute_coordinate_loss(data, loss_fn=mean_squared_error, avg=True):
-    center1, center2 = __get_center_coordinates(data['bounding_box1'], data['bounding_box2'])
-    return loss_fn(center1, center2, multioutput='raw_values') if not avg else loss_fn(center1, center2)
+    for i in range(0, min(len(data_pred), len(data_true))):
+        for j in range(1,6):
+            if obj==-1 or j==obj:
+                if str(j) in data_pred[i] and str(j) in data_true[i]:
+                    center_pred.append(data_pred[i][str(j)]["coordinates"])
+                    center_true.append(data_true[i][str(j)]["coordinates"])
 
-def compute_shape_loss(data, loss_fn=mean_squared_error, avg=True):
-    shape1, shape2 = __get_shape(data['bounding_box1'], data['bounding_box2'])
-    return loss_fn(shape1, shape2, multioutput='raw_values') if not avg else loss_fn(shape1, shape2)
+                    frame_map.append(i)
+
+    center_pred = np.array(center_pred)
+    center_true = np.array(center_true)
+
+    diff = center_pred - center_true
+    diff = np.square(diff)
+    xy_avg = [(x[0] + x[1])/2 for x in diff]
+
+    print("coordinate max mse: ", np.max(xy_avg), " in frame: ", frame_map[np.argmax(xy_avg)])
+
+    return loss_fn(center_pred, center_true)
+
+def shape_error(path_pred_labels, path_true_labels, loss_fn=mean_squared_error, obj=0):
+    file_pred = open(args.path + '/' + path_pred_labels)
+    file_ture = open(args.path + '/' + path_true_labels)
+
+    data_pred = json.load(file_pred)
+    data_true = json.load(file_ture)
+
+    shape_pred = []
+    shape_true = []
+
+    frame_map = []
+
+    for i in range(0, min(len(data_pred), len(data_true))):
+        for j in range(1,6):
+            if obj==-1 or j==obj:
+                if str(j) in data_pred[i] and str(j) in data_true[i]:
+                    shape_pred.append([data_pred[i][str(j)]["bounding_box"][2] - data_pred[i][str(j)]["bounding_box"][0], 
+                                       data_pred[i][str(j)]["bounding_box"][3] - data_pred[i][str(j)]["bounding_box"][1]])
+                    
+                    shape_true.append([data_true[i][str(j)]["bounding_box"][2] - data_true[i][str(j)]["bounding_box"][0], 
+                                       data_true[i][str(j)]["bounding_box"][3] - data_true[i][str(j)]["bounding_box"][1]])
+
+                    frame_map.append(i)
+
+    shape_pred = np.array(shape_pred)
+    shape_true = np.array(shape_true)
+
+    diff = shape_pred - shape_true
+    diff = np.square(diff)
+    xy_avg = [(x[0] + x[1])/2 for x in diff]
+
+    # print(np.average(xy_avg))
+    print("shape max mse: ", np.max(xy_avg), " in frame: ", frame_map[np.argmax(xy_avg)])
+
+    return loss_fn(shape_pred, shape_true)
 
 if __name__ == "__main__":
     args = parse_args()
     data = parse_json_files(args.path + '/' + args.pred_labels, args.path + '/' + args.true_labels)
-    #print(data)
+    
     print("iou mean:", np.mean(data['iou']))
     #data.to_csv('benchmark_test.csv')
     precision, recall, f1_score = compute_recall_precision_f1(data)
@@ -208,8 +249,9 @@ if __name__ == "__main__":
     print("recall:", recall)
     print("f1-score:", f1_score)
 
-    coordinate_loss = compute_coordinate_loss(data)
-    shape_loss = compute_shape_loss(data)
+    coordinate_loss = coordinate_error(args.pred_labels, args.true_labels, obj=args.obj)
+    shape_loss = shape_error(args.pred_labels, args.true_labels, obj=args.obj)
+
     print("coordinate-loss:", coordinate_loss) 
     print("shape-loss:", shape_loss)
 
