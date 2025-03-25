@@ -14,20 +14,27 @@ from stable_baselines3 import PPO
 from typing import Callable
 import torch
 from torch.nn.modules import container
+from torch.nn import CrossEntropyLoss
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils import tensorboard
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from rtpt import RTPT
 
 from agents.agent import load_agent
-from agents.imitation_learning import PrioritizedReplayBuffer, fill_replay_buffer
+from agents.imitation_learning import PrioritizedReplayBuffer, PrioritizedReplayBufferDataset, fill_replay_buffer, DeterministicReplayBuffer, collect_rollouts_eql, collect_training_targets_neural
 from hackatari_env import HackAtariWrapper, SyncVectorEnvWrapper
 from hackatari_utils import save_equations, get_reward_func_path
 from agents.eql.regularization import L12Smooth
 from visualize_utils import visual_for_ocatari_agent_videos
 from callbacks import RtptCallback
+from evaluate_trained_agents import evaluate_agent
+
+# only for fine-tuning the distillation
+from agents.eql import functions
+from agents.eql.symbolic_network import SymbolicNet, SymbolicNetSimplified
 
 
 def parse_args():
@@ -106,9 +113,11 @@ if __name__ == "__main__":
     # params for distillation
     replay_capacity = 1_000_000 if containerized else 50
     replay_priority_weight = 0.6
-    reg_weight = 1e-3
-    num_distillation_epochs = 200_000 if containerized else 3
-    batch_size = 1_000
+    reg_weight = 1e-3 / 2
+    num_distillation_epochs = 150 if containerized else 3
+    distillation_eval_freq = 20
+    batch_size = 1_024
+    n_eval_episodes_eql_distillation = 100
 
     # for recording videos
     recording_timesteps = 1_000 if containerized else 10
@@ -119,7 +128,7 @@ if __name__ == "__main__":
     ##########################################################
 
     # create rtpt for process tracking on remote server
-    max_iterations = (training_timesteps + num_distillation_epochs) // rtpt_frequency
+    max_iterations = (training_timesteps // rtpt_frequency) + num_distillation_epochs
     rtpt = RTPT(name_initials="MS", experiment_name="INSIGHT", max_iterations=max_iterations)
     rtpt.start()
 
@@ -194,19 +203,72 @@ if __name__ == "__main__":
         device="cpu"
     )
 
-    # train agent
-    model.learn(
-        total_timesteps=training_timesteps,
-        callback=cb_list
-    )
+    ## train agent
+    #model.learn(
+    #    total_timesteps=training_timesteps,
+    #    callback=cb_list
+    #)
+
+    ## save agent
+    #print("Saving checkpoint...")
+    #ckpt_path = os.path.join(ckpt_dir, f"{run_name}_neural.pth")
+    #torch.save(model.policy.agent, ckpt_path)
 
     ####### DISTILLATION PHASE ####################
     # distill agent by imitation learning
     # Here we perform imitation/distillation learning: we train eql_actor (student)
     # to mimic the neural_actor (teacher) using a KL divergence loss.
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    agent = model.policy.agent
+    # collect samples for replay buffer
+    print("Collecting samples for imitation learning...")
+    buffer = DeterministicReplayBuffer(capacity=replay_capacity)
+    device="cpu"
+    agent_path = os.path.join(ckpt_dir, f"{run_name}_neural.pth")
+    agent = torch.load(agent_path, weights_only=False)
     agent.to(device)
+    fill_replay_buffer(env, agent, buffer, device, target_size=replay_capacity)
+
+    # instantiate device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
+    #agent = model.policy.agent
+    agent_path = os.path.join(ckpt_dir, f"{run_name}_neural.pth")
+    agent = torch.load(agent_path, weights_only=False)
+    n_funcs = 4
+    in_dim = agent.eql_actor.in_dim
+    activation_funcs = [
+        *[functions.Pow(2)] * 2 * n_funcs,
+        *[functions.Pow(3)] * 2 * n_funcs,
+        *[functions.Constant()] * 2 * n_funcs,
+        *[functions.Identity()] * 2 * n_funcs,
+        *[functions.Product()] * 2 * n_funcs,
+        *[functions.Add()] * 2 * n_funcs,]
+    agent.eql_actor = SymbolicNet(
+        1,
+        funcs=activation_funcs,
+        in_dim=in_dim,
+        out_dim=6
+    )
+    agent.activation_funcs = activation_funcs
+    agent.to(device)
+    torch.set_num_threads(n_cores)
+    torch.set_num_interop_threads(n_cores)
+
+    #variable_names = env.env_method("get_variable_names", indices=[0])[0]
+    #output_names = env.env_method("get_action_names", indices=[0])[0]
+    #equation_list = agent.eql_actor.pretty_print(variable_names, output_names)
+    #print(equation_list)
+    #breakpoint()
+    import agents.eql.pretty_print as pretty_print
+    from agents.agent import Agent
+    import sympy as sy
+    var_names = env.env_method("get_variable_names", indices=[0])[0]
+    output_names = env.env_method("get_action_names", indices=[0])[0]
+    with torch.no_grad():
+        expra = pretty_print.network(agent.eql_actor.get_weights(), agent.activation_funcs, var_names)
+        for i, a in enumerate(output_names):
+            print(f"action{a}:")
+            sy.pprint(sy.simplify(expra[i]))
+
 
 
     # Set teacher (neural_actor) to evaluation mode and student (eql_actor) to train mode.
@@ -214,66 +276,74 @@ if __name__ == "__main__":
     agent.eql_actor.train()
 
     # Create an optimizer for the student network only.
-    student_optimizer = optim.Adam(agent.eql_actor.parameters(), lr=1e-4)
+    student_optimizer = optim.Adam(agent.eql_actor.parameters(), lr=1e-3)
     regularization = L12Smooth()
+    cross_ent_loss = CrossEntropyLoss()
     reg_weight_now = reg_weight
 
     # create a summary writer to track loss
-    writer = SummaryWriter(log_dir=model.logger.dir)
+    # writer = SummaryWriter(log_dir=model.logger.dir)
+    writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
-    # collect samples for replay buffer
-    prioritized_replay_buffer = PrioritizedReplayBuffer(capacity=replay_capacity, alpha=replay_priority_weight)
-    fill_replay_buffer(env, agent, prioritized_replay_buffer, device, target_size=replay_capacity)
+    # the data loader for loading from replay buffer
+    dataloader = DataLoader(buffer, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
 
-    # distill
-    print("Starting distillation phase...")
+    ## distill
+    #print("Starting distillation phase...")
     progress_bar = tqdm(range(num_distillation_epochs), desc="Distillation phase", unit="epoch")
+
+    batch_num = 0
     for epoch in progress_bar:
-        breakpoint()
-        # Sample a batch of observations from the environment.
-        batch_obs, batch_teacher_probs, batch_weights, batch_indices = prioritized_replay_buffer.sample(batch_size)
-        batch_obs, batch_teacher_probs, batch_weights = (
-                batch_obs.to(device),
-                batch_teacher_probs.to(device),
-                batch_weights.to(device),
-        )
+        agent.eql_actor.train()
+        for batch_obs, batch_teacher_action in dataloader:
+            # Move batch data to device
+            batch_obs = batch_obs.to(device)
+            batch_teacher_action = batch_teacher_action.to(device)
 
-        # get eql probs for the batch of observations
-        _,_,_,_,_, student_probs = agent.get_action_and_value(batch_obs, actor="eql")
+            # Get student probabilities from the 'eql' actor network.
+            # Assuming agent.get_action_and_value returns a tuple with student_probs as the 6th element.
+            _, _, _, _, _, student_logits = agent.get_action_and_value(batch_obs, actor="eql")
 
-        # compute distillation (with importance-sampling correction) and regularization loss
-        per_sample_imitation_loss = F.kl_div(torch.log(student_probs + 1e-8), batch_teacher_probs, reduction='none')
-        per_sample_imitation_loss = per_sample_imitation_loss.sum(dim=1)
-        imitation_loss = (per_sample_imitation_loss * batch_weights).mean()
-        reg_loss = regularization(agent.eql_actor.get_weights_tensor())
-        loss = imitation_loss + reg_weight_now * reg_loss
+            # use cross entropy loss
+            imitation_loss = cross_ent_loss(
+                    student_logits,
+                    batch_teacher_action
+            )
+            
+            # Compute regularization loss.
+            reg_loss = regularization(agent.eql_actor.get_weights_tensor())
+            loss = imitation_loss + reg_weight_now * reg_loss
 
-        # update parameters
-        student_optimizer.zero_grad()
-        loss.backward()
-        student_optimizer.step()
+            # Update student network parameters.
+            student_optimizer.zero_grad()
+            loss.backward()
+            student_optimizer.step()
 
-        # update prioritized replay buffer importance weights
-        prioritized_replay_buffer.update_priorities(batch_indices, per_sample_imitation_loss.detach().cpu())
+            # Optionally, you can log batch-level metrics here:
+            writer.add_scalar("Distillation/Loss", loss.item(), batch_num)
+            writer.add_scalar("Distillation/ImitationLoss", imitation_loss.item(), batch_num)
+            writer.add_scalar("Distillation/RegLoss", reg_loss.item(), batch_num)
+            batch_num += 1
 
-        # log values
-        writer.add_scalar("Distillation/Loss", loss.item(), epoch)
-        writer.add_scalar("Distillation/ImitationLoss", imitation_loss.item(), epoch)
-        writer.add_scalar("Distillation/RegLoss", loss.item(), epoch)
-
-        # update rtpt
+        # Update progress tracking
         if epoch % rtpt_frequency == 0:
             rtpt.step()
 
-        # update reg weight to decay linearly to zero
-        reg_weight_now = (epoch / num_distillation_epochs) * reg_weight
+        # eval eql agent on environments
+        if epoch % distillation_eval_freq == 0 or epoch == 0:
+            agent.eql_actor.eval()
+            mean_episode_reward = evaluate_agent(agent, env_eval, episodes=n_eval_episodes, actor="eql", device=device)
+            writer.add_scalar("Distillation/EQL_returns", mean_episode_reward, epoch)
 
-    # save equations
-    print("Saving equations...")
-    variable_names = env.env_method("get_variable_names", indices=[0])[0]
-    output_names = env.env_method("get_action_names", indices=[0])[0]
-    equation_list = agent.eql_actor.pretty_print(variable_names, output_names)
-    save_equations(equation_list, equations_folder, run_name)
+        # Update regularization weight to increase linearly from zero to full weight over epochs.
+        reg_weight_now = ((epoch / num_distillation_epochs) ** 2) * reg_weight
+
+    ## save equations
+    #print("Saving equations...")
+    #variable_names = env.env_method("get_variable_names", indices=[0])[0]
+    #output_names = env.env_method("get_action_names", indices=[0])[0]
+    #equation_list = agent.eql_actor.pretty_print(variable_names, output_names)
+    #save_equations(equation_list, equations_folder, run_name)
 
     # save agent
     print("Saving checkpoint...")
@@ -282,6 +352,7 @@ if __name__ == "__main__":
     
     # record eql and neural agent
     print("Recording agents...")
+    device = "cpu"
     visual_for_ocatari_agent_videos(env_eval, agent, device, args, record_folder, actor="eql", n_step=recording_timesteps, label="final")
     visual_for_ocatari_agent_videos(env_eval, agent, device, args, record_folder, actor="neural", n_step=recording_timesteps, label="final")
 

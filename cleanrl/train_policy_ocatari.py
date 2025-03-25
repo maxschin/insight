@@ -6,6 +6,7 @@ import time
 from distutils.util import strtobool
 import gymnasium as gym
 import numpy as np
+from stable_baselines3.common.monitor import Monitor
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,15 +17,18 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     FireResetEnv,
     NoopResetEnv,
 )
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from agents.eql.regularization import L12Smooth
-from agents.agent import load_agent, AgentSimplified
-from hackatari_env import HackAtariWrapper, SyncVectorEnvWrapper
+from agents.eql.pretty_print import extract_equations
+from agents.agent import load_agent
+from hackatari_env import HackAtariWrapper
 from hackatari_utils import save_equations, get_reward_func_path
 
 from torch.nn import CrossEntropyLoss
 
 from visualize_utils import visual_for_ocatari_agent_videos
 from tqdm import tqdm
+from rtpt import RTPT
 
 def parse_args():
     # fmt: off
@@ -37,14 +41,6 @@ def parse_args():
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="insight",
-        help="the wandb's project name")
-    parser.add_argument("--wandb-entity", type=str, default=None,
-        help="the entity (team) of wandb's project")
-    parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Hackatari specific arguments
     parser.add_argument("-g", "--game", type=str,
@@ -55,13 +51,15 @@ def parse_args():
                         default="", help="Custom reward function file name")
 
     # Algorithm specific arguments
-    parser.add_argument("--agent_type", type=str, default="AgentSimplified", help="class name of the agent to be used")
-    parser.add_argument("--total-timesteps", type=int, default=10000000,
+    parser.add_argument("--agent_type", type=str, default="AgentSimplifiedDeeper", help="class name of the agent to be used")
+    parser.add_argument("--total-timesteps", type=int, default=20_000_000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4,
         help="the learning rate of the optimizer")
     parser.add_argument("--num-envs", type=int, default=8,
         help="the number of parallel game environments")
+    parser.add_argument("--use-all-cores",  type=lambda x: bool(strtobool(x)), default=True,
+        help="if true, overrides num-envs to use as many parallel environments as cores available")
     parser.add_argument("--num-steps", type=int, default=128,
         help="the number of steps to run in each environment per policy rollout")
     parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -92,14 +90,8 @@ def parse_args():
         help="the defined run_name")
     parser.add_argument("--reg_weight", type=float, default= 1e-3,
         help="regulization for interpertable")
-    parser.add_argument("--use_nn", type=lambda x: bool(strtobool(x)), default=True,
-        help="use nn for critic")
     parser.add_argument("--deter_action", type=lambda x: bool(strtobool(x)), default=False,
         help="deterministic action or not")
-    parser.add_argument("--pre_nn_agent", type=lambda x: bool(strtobool(x)), default=False,
-        help="load nn agent or not")
-    parser.add_argument("--fix_cri", type=lambda x: bool(strtobool(x)), default=False,
-        help="fix cri or not")
     parser.add_argument("--n_funcs", type=int, default=4,
         help="n_funcs")
     parser.add_argument("--n_layers", type=int, default=1,
@@ -122,6 +114,10 @@ def parse_args():
     parser.add_argument("--distillation_loss_weight", type=float, default=1)
     parser.add_argument("--reg_weight_drop", type=lambda x: bool(strtobool(x)), default=True,
         help="drop reg weight or not")   
+
+    # eql equation-specific arguments
+    parser.add_argument("--equation_accuracy", type=float, default=0.001, help="The decimal point accuracy the coefficients of the eql equations should be rounded to before printing")
+    parser.add_argument("--equation_threshold", type=float, default=0.01, help="Coeffecients below threshold will be filtered from eql equations before printing")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -131,74 +127,78 @@ def parse_args():
 def make_env(env_name, seed,rewardfunc_path, modifs):
     def thunk():
         env = HackAtariWrapper(env_name, modifs=modifs, rewardfunc_path=rewardfunc_path)  
-        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = Monitor(env)
         env = NoopResetEnv(env, noop_max=30) 
         # env = MaxAndSkipEnv(env, skip=4) -> done by hackatari by default
-        env = EpisodicLifeEnv(env)
-        if "FIRE" in env.unwrapped.get_action_meanings():
-            env = FireResetEnv(env)
-        env = ClipRewardEnv(env)
-        env.seed(seed)
+        #env = EpisodicLifeEnv(env)
+        #env = FireResetEnv(env)
+        #env = ClipRewardEnv(env)
+        env.reset(seed=seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
-
     return thunk
 
 def eval_policy(envs, action_func, device="cuda", n_episode=10):
-    obs,_ = envs.reset()
-    episode_return = 0
-    episode_length = 0
-    total_episode = 0
-    while total_episode<n_episode:
+    obs = envs.reset()
+    total_return = 0.0
+    total_length = 0.0
+    total_episodes = 0
+
+    while total_episodes<n_episode:
         obs_tensor = torch.Tensor(obs).to(device)
         with torch.no_grad():
             action = action_func(obs_tensor)
-            obs, _, _, _, info = envs.step(action.cpu().numpy())
-        if "final_info" in info:
-            for env_id, env_info in enumerate(info["final_info"]):
-                if not env_info is None:
-                    if "episode" in env_info:
-                        episode_return += env_info["episode"]["r"]
-                        episode_length += env_info["episode"]["l"]
-                        total_episode += 1.
-                        if total_episode == n_episode:
-                            break
-    return episode_return / total_episode, episode_length / total_episode
+        obs, rewards, dones, infos = envs.step(action.cpu().numpy())
+
+        done_indices = np.nonzero(dones)[0]
+        if done_indices.size > 0:
+            episode_returns = np.array([infos[i]["episode"]["r"] for i in done_indices])
+            episode_lengths = np.array([infos[i]["episode"]["l"] for i in done_indices])
+            total_return += episode_returns.sum()
+            total_length += episode_lengths.sum()
+            total_episodes += len(done_indices)
+    avg_return = total_return / total_episodes
+    avg_length = total_length / total_episodes
+
+    return avg_return, avg_length
 
 
 if __name__ == "__main__":
+    args = parse_args()
+
+    # check if running inside container
+    containerized = os.environ.get("container") == "podman"
+    if containerized:
+        print("Running inside container")
+    else:
+        # adjust args accordingly
+        args.num_envs = 8
+        args.batch_size = int(args.num_envs * args.num_steps)
+        args.minibatch_size = int(args.batch_size // args.num_minibatches)
+        args.total_timesteps = args.batch_size
+        args.use_all_cores = False
+        print("Running locally")
+
+    # adjust batch size if number of cores == number of envs
+    if args.use_all_cores:
+        n_cores = len(os.sched_getaffinity(0))
+        args.num_envs = n_cores
+        args.batch_size = int(args.num_envs * args.num_steps)
+        args.minibatch_size = int(args.batch_size // args.num_minibatches)
+
     execution_time = 0
 
-    args = parse_args()
     if args.run_name == None:
         run_name = f"{args.game}" + f"_{args.agent_type}" 
         if args.reward_function:
             run_name += f"_{args.reward_function}"
         if args.modifs:
             run_name += f"_{''.join(args.modifs)}"
-        #if args.pre_nn_agent:
-        #    run_name+="_pre_nn_agent"
-        #if args.ng:
-        #    run_name+="_ng"
-        #if args.pnn_guide:
-        #    run_name+="_png"
         #run_name+=f"_seed{args.seed}"
     else:
         run_name = args.run_name
-    if args.track:
-        import wandb
-
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
-
+    print(f"RUN NAME: {run_name}")
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
@@ -211,49 +211,37 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     
     # Setup multiple OCAtari environments
     rewardfunc_path = get_reward_func_path(args.game, args.reward_function) if args.reward_function else None
-    envs = SyncVectorEnvWrapper(
-        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs)])
-    envs_eval = SyncVectorEnvWrapper(
-        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs)])
-    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-    agent_in_dim = envs.get_ns_out_dim()
+    envs = SubprocVecEnv(
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs)], start_method="fork")
+    envs_eval = SubprocVecEnv(
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs // 2)], start_method="fork")
+    assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
+
+    agent_in_dim = envs.env_method("get_ns_out_dim", indices=[0])[0]
 
 
-    agent_class = load_agent(args.agent_type)
-    if args.pre_nn_agent:
-        if args.pnn_guide:
-            print('pnn_guide')
-            agent_nn = torch.load('models/agents/'+f"{args.env_id}"+f'_{args.obj_vec_length}'+"_NN"+"_gray"*args.gray+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'.pth').to(device)
-        else:
-            agent_nn = torch.load('models/agents/'+f"{args.env_id}"+f'_{args.obj_vec_length}'+f"_gray{args.gray}"+f"_t{args.total_timesteps}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'.pth').to(device)
-            print('nn_guide')
-        agent = agent_class(envs,args,agent_nn, agent_in_dim=agent_in_dim, skip_perception=True).to(device)
-        for param in agent_nn.parameters():
-            param.requires_grad = False
-    else:
-        agent = agent_class(envs,args, agent_in_dim=agent_in_dim, skip_perception=True).to(device)
-
-    #fix hypara
-    if args.fix_cri:
-            for param in agent.critic.parameters():
-                param.requires_grad = False
-
+    # instatintiate agent
+    agent_class = load_agent(args.agent_type, for_sb3=False)
+    num_actions = envs.action_space.n
+    agent = agent_class(args, agent_in_dim=agent_in_dim, skip_perception=True, n_actions=num_actions).to(device)
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
     optimizer = optim.Adam(
         [{'params':agent.neural_actor.parameters(),'lr':args.learning_rate },
-         {'params':agent.eql_actor.parameters(),'lr':args.learning_rate},
          {'params':agent.critic.parameters(),'lr':args.learning_rate},
-         ], eps=1e-5)
+         {'params':agent.network.parameters(),'lr':args.learning_rate},
+         {'params':agent.eql_actor.parameters(),'lr':args.learning_rate * 2}], eps=1e-5)
 
     regularization = L12Smooth()
     loss_distill = CrossEntropyLoss()
+
     # ALGO Logic: Storage setup
-    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
+    obs = torch.zeros((args.num_steps, args.num_envs) + envs.observation_space.shape).to(device)
+    actions = torch.zeros((args.num_steps, args.num_envs) + envs.action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -262,7 +250,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs, info = envs.reset()
+    next_obs, info = envs.reset(), envs.reset_infos
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
@@ -279,10 +267,15 @@ if __name__ == "__main__":
     equations_folder = "equations"
     os.makedirs(equations_folder, exist_ok=True)
 
+    # also do rtpt tracking
+    rtpt = RTPT(name_initials="MS", experiment_name="INSIGHT", max_iterations=num_updates)
+    rtpt.start()
+
+
     with tqdm(total=num_updates, desc="Training Progress") as pbar:
         for update in range(1, num_updates + 1): # by default ~10000 updates
             u_rate = update/num_updates
-            if update%int(num_updates/100) ==0 or update==1:
+            if update % max(int(num_updates/100), 1) ==0 or update==1:
                 if args.ng:
                     action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor="eql")[0]
                     eql_returns, eql_lengths = eval_policy(
@@ -291,9 +284,15 @@ if __name__ == "__main__":
                         "charts/eql_returns", eql_returns, global_step)
                     writer.add_scalar(
                         "charts/eql_lengths", eql_lengths, global_step)
-            if update%int(num_updates/10) ==0 or update==1:
+                    action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor="neural")[0]
+                    neural_returns, neural_lengths = eval_policy(
+                        envs_eval, action_func, device=device)
+                    writer.add_scalar(
+                        "charts/neural_returns", neural_returns, global_step)
+                    writer.add_scalar(
+                        "charts/neural_lengths", neural_lengths, global_step)
+            if update%max(int(num_updates/10), 1) ==0 or update==1:
                 video_path = visual_for_ocatari_agent_videos(envs_eval, agent, device, args, test_folder, actor="neural")
-                wandb.log({"test_seg": wandb.Video(video_path, fps=20, format="mp4")})
 
                 if args.save:
                     torch.save(agent, 'models/agents/'+run_name+'.pth')
@@ -313,11 +312,11 @@ if __name__ == "__main__":
                 reg_weight_now = args.reg_weight * completed_ratio
             else:
                 reg_weight_now = args.reg_weight
-            optimizer.param_groups[0]["lr"] = lrnow
-            optimizer.param_groups[1]["lr"] = lrnow
-            optimizer.param_groups[2]["lr"] = lrnow
-
-            
+            for idx, param_group in enumerate(optimizer.param_groups):
+                if idx == len(optimizer.param_groups) - 1:
+                    param_group["lr"] = lrnow * 2  # eql-agent gets double
+                else:
+                    param_group["lr"] = lrnow
 
             for step in range(0, args.num_steps):  # Individual steps (executed in parallel for 8 envs)
                 global_step += 1 * args.num_envs
@@ -326,10 +325,7 @@ if __name__ == "__main__":
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    if args.pre_train and update<args.pre_train_uptates:
-                        action, logprob, _, value,_,_ = agent.get_pretrained_action_and_value(next_obs)
-                    else:
-                        action, logprob, _, value,_,_ = agent.get_action_and_value(next_obs, threshold=args.threshold)
+                    action, logprob, _, value,_,_ = agent.get_action_and_value(next_obs, threshold=args.threshold)
                     values[step] = value.flatten()
 
                 actions[step] = action
@@ -337,7 +333,7 @@ if __name__ == "__main__":
 
                 start_time = time.time()
                 # TRY NOT TO MODIFY: execute the game and log data.
-                next_obs, reward, done, _, info = envs.step(action.cpu().numpy())
+                next_obs, reward, done, info = envs.step(action.cpu().numpy())
                 end_time = time.time()
                 execution_time += end_time - start_time
 
@@ -377,9 +373,9 @@ if __name__ == "__main__":
                 returns = advantages + values
 
             # flatten the batch
-            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+            b_obs = obs.reshape((-1,) + envs.observation_space.shape)
             b_logprobs = logprobs.reshape(-1)
-            b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
+            b_actions = actions.reshape((-1,) + envs.action_space.shape)
             b_actions = b_actions.long()
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
@@ -484,18 +480,27 @@ if __name__ == "__main__":
             
             writer.add_scalar("charts/update", update, global_step)
             pbar.update(1)   
+            rtpt.step()
+
     if args.save:
         torch.save(agent, 'models/agents/'+run_name+'.pth')
 
-    # finally: collect equations and record final video of eql-agent
+    # record both neural and eql agent
     video_path = visual_for_ocatari_agent_videos(envs_eval, agent, device, args, record_folder, actor="eql", n_step=2000, label="final")
-    wandb.log({"final_eql": wandb.Video(video_path, fps=20, format="mp4")})
+    video_path = visual_for_ocatari_agent_videos(envs_eval, agent, device, args, record_folder, actor="neural", n_step=2000, label="final")
 
-    if isinstance(agent, AgentSimplified):
-        variable_names = envs.get_variable_names()
-        output_names = envs.get_action_names()
-        equation_list = agent.eql_actor.pretty_print(variable_names, output_names)
-        save_equations(equation_list, equations_folder, run_name)
+    # save equations
+    var_names = envs.env_method("get_variable_names", indices=[0])[0]
+    output_names = envs.env_method("get_action_names", indices=[0])[0]
+    equations, _ = extract_equations(
+        agent,
+        var_names,
+        output_names,
+        accuracy=args.equation_accuracy,
+        threshold=args.equation_threshold
+    )
+    save_equations(equations, equations_folder, run_name)
 
+    # clean up
     envs.close()
     writer.close()

@@ -42,8 +42,8 @@ COPY . .
 # Set working directory
 WORKDIR .
 
-# Set working directory to cleanrl
-WORKDIR /cleanrl
+# Ensure the bash script located at /scripts/do_it.sh is executable
+RUN chmod +x /scripts/train_all_hackatari_original.sh
 
-# Run the Python script
-CMD ["python", "dagger.py"]
+# Run the bash script located at /scripts/do_it.sh
+CMD ["/bin/bash", "/scripts/train_all_hackatari_original.sh"]

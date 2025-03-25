@@ -50,9 +50,6 @@ def get_reward_func_path(game, reward_func_name):
         if os.path.sep in part or "/" in part or "\\" in part:
             raise ValueError(f"Invalid {name!r}. It should not contain path separators.")
 
-    # ensure lower case game
-    game = game.lower()
-
     # Construct the game directory path and validate it exists.
     game_path = os.path.join(base_dir, game)
     if not os.path.isdir(game_path):

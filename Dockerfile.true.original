@@ -1,3 +1,4 @@
+# Uses the (mainly) original implementation of the INSIGHT authors with end-to-end training with distillation
 # Use Ubuntu 24.04 as the base image
 FROM ubuntu:24.04
 
@@ -46,4 +47,4 @@ WORKDIR .
 WORKDIR /cleanrl
 
 # Run the Python script
-CMD ["python", "dagger.py"]
+CMD ["python", "train_policy_atari.py"]

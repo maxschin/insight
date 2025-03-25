@@ -17,7 +17,7 @@ def images_to_video(folder_path, output_path, fps):
     size = (w, h)
 
     # Create a video writing object using the XVID codec and MP4V container
-    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'MP4V'), fps, size)
+    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, size)
 
     # Add image to video
     for filename in filenames:
@@ -90,19 +90,14 @@ def visual_for_ocatari_agent_videos(envs, agent, device, args, output_folder, n_
     video_writer.release()
     return output_path
 
-def visual_for_agent_videos(envs, agent, next_obs, device, args, run_name, n_step=200, threshold=0.8):
-    print('save frames')
-    os.makedirs(os.path.join('ppoeql_stack_cnn_out_frames', run_name), exist_ok=True)
-    os.makedirs(os.path.join('ppoeql_stack_cnn_out_frames', run_name, 'test'), exist_ok=True)
-    input_path = os.path.join('ppoeql_stack_cnn_out_frames', run_name, 'test')
-
+def visual_for_agent_videos(envs, agent, next_obs, device, args, run_name, input_path, n_step=200, threshold=0.8):
     # Use tqdm in a loop
     next_obs, _ = envs.reset()
     next_obs = torch.Tensor(next_obs).to(device)
     for n in tqdm(range(n_step), desc="Processing"): # The desc parameter is used to set the progress bar description
         with torch.no_grad():
             action, logprob, _, value,_,prob = agent.get_action_and_value(next_obs, threshold=threshold)
-            cors = agent.network(next_obs / 255.0, threshold=threshold)[0, :]
+            cors = agent.network(next_obs / 255.0, threshold=threshold)[0, :].cpu()
         next_obs, reward, done, _, info = envs.step(action)
         next_obs = torch.Tensor(next_obs).to(device)
         if args.gray:
@@ -118,13 +113,12 @@ def visual_for_agent_videos(envs, agent, next_obs, device, args, run_name, n_ste
             cors[i * args.obj_vec_length] = cors[i * args.obj_vec_length] * size[0]
             cors[i * args.obj_vec_length + 1] = cors[i * args.obj_vec_length + 1] * size[1]
             plt.text(cors[i * args.obj_vec_length + 1], cors[i * args.obj_vec_length], str(i + 1), fontsize=36, color='green')
-        plt.savefig(os.path.join('ppoeql_stack_cnn_out_frames', run_name, 'test', f'{n}.png'))
+        plt.savefig(os.path.join(input_path, f'{n}.png'))
         plt.close()
 
     output_path = input_path + '_seg.mp4'
     fps = 20
-    images_to_video(input_path, output_path, fps)
-    return
+    return images_to_video(input_path, output_path, fps)
 
 def visual(agent, next_obs,args,update,run_name):
     # state original shape: n_batch, n_frame, height, width, n_channel

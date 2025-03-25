@@ -7,9 +7,11 @@ from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
 from torch.distributions.normal import Normal
 from stable_baselines3.common.distributions import SquashedDiagGaussianDistribution
-
+from torch.nn.modules.container import Sequential
+from torch.nn.modules.conv import Conv2d
 #cnn
 from . import Normal_Cnn
+torch.serialization.add_safe_globals([Normal_Cnn.OD_frames_gray2, nn.Sequential, Normal_Cnn.Encoder, nn.Conv2d, nn.Linear, nn.ReLU, nn.Flatten, nn.LayerNorm])
 
 # eql
 from .eql import functions
@@ -90,7 +92,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
         return layer
 
 class Agent(nn.Module):
-    def __init__(self, args,nnagent=None, agent_in_dim=None, skip_perception=False, n_funcs=4, n_actions=6):
+    def __init__(self, args,nnagent=None, agent_in_dim=None, skip_perception=False, n_funcs=4, n_actions=6, device=None):
         super().__init__()
         if not skip_perception and args.gray:
             self.network = Normal_Cnn.OD_frames_gray2(args)
@@ -112,16 +114,17 @@ class Agent(nn.Module):
             out_dim=n_actions)
         self.eql_inv_temperature = 10
         self.neural_actor = nn.Sequential(
-            nn.Linear(2048 if not self.skip_perception else agent_in_dim, 512),
+            nn.Linear(args.cnn_out_dim if not self.skip_perception else agent_in_dim, 512),
             nn.ReLU(),
             nn.Linear(512, n_actions))
         self.critic = nn.Sequential(
-            nn.Linear(2048 if not self.skip_perception else agent_in_dim, 512),
+            nn.Linear(args.cnn_out_dim if not self.skip_perception else agent_in_dim, 512),
             nn.ReLU(),
             nn.Linear(512, 1))
         if not skip_perception and args.load_cnn:
             print('load cnn')
-            self.network = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
+            self.network = torch.load('models/CNN/'+f'{args.game}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl', map_location=device)
+            print(f"CNN loaded to: {next(self.network.parameters()).device}")
         self.deter_action = args.deter_action
         self.nnagent= nnagent
         if self.nnagent:
@@ -137,19 +140,17 @@ class Agent(nn.Module):
         return self.critic(hidden)
 
     def get_action_and_value(self, x, action=None, threshold=0.8, actor="neural"):
+        batch_size = x.shape[0]
+        hidden = x.reshape(batch_size, -1) / 255.0 if self.skip_perception else self.network.encoder(x / 255.0)
         if actor == "neural":
-            if self.skip_perception:
-                batch_size = x.shape[0]
-                hidden = x.reshape(batch_size, -1) / 255.0
-            else:
-                hidden = self.network.encoder(x / 255.0)
             logits = self.neural_actor(hidden) 
         else:
-            # Using ocatari object data instead of CNN coordinates for eql actor
-            batch_size = x.shape[0]
-            hidden = x.reshape(batch_size, -1) / 255.0
-            logits = self.eql_actor(hidden) * self.eql_inv_temperature
-        
+            if self.skip_perception:
+                logits = self.eql_actor(hidden)
+            else:
+                coordinates = self.network(x / 255.0, threshold=threshold)
+                logits = self.eql_actor(coordinates)
+            logits *= self.eql_inv_temperature
         dist = Categorical(logits=logits)
         if action is None:
             action = dist.sample()
@@ -169,18 +170,6 @@ class Agent(nn.Module):
 class AgentSimplified(Agent):
     def __init__(self, args, n_actions, nnagent=None, agent_in_dim=None, skip_perception=True):
         super().__init__(args, nnagent, agent_in_dim, skip_perception=skip_perception, n_actions=n_actions)
-        self.activation_funcs = [
-            functions.Pow(2),
-            functions.Pow(3),
-            functions.Identity(),
-            functions.Product()
-        ]
-        # extend init
-        self.eql_actor = SymbolicNetSimplified(
-            funcs=self.activation_funcs,
-            in_dim=agent_in_dim if self.skip_perception else args.cnn_out_dim,
-            out_dim=n_actions)
-
         self.network = nn.Sequential(
             layer_init(nn.Linear(agent_in_dim, 128)),
             nn.ReLU(),
@@ -211,6 +200,24 @@ class AgentSimplified(Agent):
         if action is None:
             action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), self.critic(hidden), logits, dist.probs
+
+class AgentSimplifiedDeeper(AgentSimplified):
+    def __init__(self, args, n_actions, nnagent=None, agent_in_dim=None, skip_perception=True):
+        super().__init__(args, n_actions, nnagent=nnagent, agent_in_dim=agent_in_dim, skip_perception=skip_perception)
+        self.network = nn.Sequential(
+            layer_init(nn.Linear(agent_in_dim, 256)),
+            nn.ReLU(),
+            layer_init(nn.Linear(256, 128)),
+            nn.ReLU(),
+            layer_init(nn.Linear(128, 64)),
+            nn.ReLU(),
+            layer_init(nn.Linear(64, 32)),
+            nn.ReLU(),
+        )
+        self.neural_actor = layer_init(
+            nn.Linear(32, n_actions), std=0.01)
+        self.critic = layer_init(nn.Linear(32, 1), std=1) 
+
 
 
 class AgentContinues(nn.Module):

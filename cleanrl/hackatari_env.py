@@ -5,8 +5,8 @@ from stable_baselines3.common.env_checker import check_env
 
 
 class HackAtariWrapper(HackAtari):
-    def __init__(self, env_id, **kwargs):
-        super().__init__(env_id, obs_mode="obj", mode="ram", render_mode="rgb_array", **kwargs)
+    def __init__(self, env_id, obs_mode="obj", **kwargs):
+        super().__init__(env_id, obs_mode=obs_mode, mode="ram", render_mode="rgb_array", **kwargs)
         self.ns_out_dims = get_object_state_size(self.game_name, self.hud)
 
     def get_ns_out_dim(self):
@@ -45,6 +45,23 @@ class SyncVectorEnvWrapper(SyncVectorEnv):
 
     def render(self, *args, **kwargs):
         return self.envs[0].render(*args, **kwargs)
+
+    @staticmethod
+    def get_variable_names_hardcoded_pong():
+        num_frames = 4
+        num_objs = 256
+        variable_names = []
+        coords_order = ["y", "x"]
+        objs_order = ["enemyscore", "playerscore", "enemy", "player", "ball"]
+        for i in range(num_frames):
+            frame = i+1
+            for j in range(num_objs):
+                for coord in coords_order:
+                    obj = f"obj{j+1}" if j>=len(objs_order) else objs_order[j]
+                    variable_name = f"{obj}_{coord}_{frame}"
+                    variable_names.append(variable_name)
+
+        return variable_names
 
 
 if __name__ == "__main__":

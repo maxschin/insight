@@ -1,9 +1,10 @@
+# General exclusions
 docs/
 metadrive/
 wandb/
 
 cleanrl/eval/
-cleanrl/models/
+cleanrl/models/agents/
 cleanrl/ppo_continuous_action_isaacgym/
 cleanrl/runs/
 cleanrl/ppoeql_ocatari_videos/
@@ -13,7 +14,10 @@ cleanrl/wandb/
 cleanrl/equations/
 __pycache__
 *.pyc
-
-*.png
 *.csv
 
+# Re-include this specific sub-folder inside cleanrl/sam_track
+!cleanrl/sam_track/assets/
+!cleanrl/sam_track/assets/Pong_input/
+!cleanrl/sam_track/assets/Pong_input/Pong_input_masks_test/
+!cleanrl/sam_track/assets/Pong_input/Pong_input_masks_train/

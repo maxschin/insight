@@ -1,5 +1,6 @@
 gymnasium
 rtpt
+torchvision
 stable_baselines3[extra]>=2.0.0a10
 ocatari @ git+https://github.com/k4ntz/OC_Atari.git@master
 hackatari @ git+https://github.com/k4ntz/HackAtari.git@master

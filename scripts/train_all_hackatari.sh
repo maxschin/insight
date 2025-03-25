@@ -3,15 +3,14 @@
 cd cleanrl
 
 # Define an ordered array of games
-#games=("Pong" "Freeway" "Seaquest")
-games=("Pong")
+games=("PongNoFrameskip-v4" )
 
 # Define an associative array where each key is a game and the value is a space-separated list of reward functions.
 declare -A reward_funcs
-#reward_funcs["Pong"]="default basic_rf close_but_no_hit_rf opposite_of_enemy_rf random_rf"
-reward_funcs["Pong"]="default"
-#reward_funcs["Freeway"]="default basic_rf stay_in_middle_rf random_rf"
-#reward_funcs["Seaquest"]="default basic_rf stick_to_surface_rf random_rf"
+reward_funcs["Pong"]="default basic_rf close_but_no_hit_rf opposite_of_enemy_rf random_rf"
+#reward_funcs["Pong"]="default"
+reward_funcs["Freeway"]="default basic_rf stay_in_middle_rf random_rf"
+reward_funcs["Seaquest"]="default basic_rf stick_to_surface_rf random_rf"
 
 # Iterate over each game
 for game in "${games[@]}"; do
