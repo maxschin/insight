@@ -3,7 +3,8 @@ cleanrl/agents/__pycache__/
 cleanrl/agents/eql/__pycache__/
 cleanrl/wandb
 cleanrl/ppoeql_stack_cnn_out_frames/
-cleanrl/models/
+cleanrl/models/*
+!cleanrl/models/.gitkeep
 cleanrl/runs/
 cleanrl/stack_cnn_out_frames/
 #!cleanrl/sam_track/benchmark_data

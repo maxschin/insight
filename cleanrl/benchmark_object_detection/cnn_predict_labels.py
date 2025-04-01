@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from transform_data import cnn_to_fastsam
 
 import sys
-sys.path.append("../cleanrl")
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from agents.Normal_Cnn import OD_frames_gray2
 
