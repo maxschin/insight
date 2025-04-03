@@ -55,14 +55,14 @@ if __name__ == "__main__":
         if not ret:
             break
 
-        frame = cv2.resize(frame, (160,210))
+        frame = cv2.resize(frame, args.resolution)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         if idx < int(frame_count*0.8):
-            matplotlib.image.imsave(path + train_frames + "frame" + str(idx) + ".png", frame)
+            cv2.imwrite(path + train_frames + "frame" + str(idx) + ".png", cv2.cvtColor(frame,cv2.COLOR_RGB2BGR))
         
         else:
-            matplotlib.image.imsave(path + test_frames + "frame" + str(idx-int(frame_count*0.8)) + ".png", frame)
+            cv2.imwrite(path + test_frames + "frame" + str(idx-int(frame_count*0.8)) + ".png", cv2.cvtColor(frame,cv2.COLOR_RGB2BGR))
 
         pbar.set_description(f"Processed frame {idx}")
         pbar.update(1)

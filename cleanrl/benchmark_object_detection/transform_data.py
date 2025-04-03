@@ -111,6 +111,7 @@ def __load_ocatari_data(src, num_objs):
                 else:
                     frame.append([(-1,-1), (-1,-1), (0.6)])
         frames.append(frame)
+
     return frames
 
 # Arranges the data in the way the CNN uses, and normalizes it
