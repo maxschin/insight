@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import cv2
 import json
 import argparse
@@ -11,11 +12,19 @@ from PIL import Image
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--batch_process", type=bool, default=True)
 
-    parser.add_argument("--path", type=str, default="../sam_track/assets/PongNoFrameskip-v4/PongNoFrameskip-v4_masks_test",
+    parser.add_argument("--game", type=str, default="Freeway")
+
+    parser.add_argument("--frame", type=int, default=-1,
+        help="the frame that will be visualized and safed, for -1 a random one will be chosen")
+
+    path_to_cleanrl = os.path.join(os.path.dirname(__file__), '..')
+
+    parser.add_argument("--path", type=str, default=path_to_cleanrl + "/batch_training/Freeway/test_frames",
         help="file path to the directory holding the json files with the bounding box data")   
 
-    parser.add_argument("--file1", type=str, default="labels.json",
+    parser.add_argument("--file1", type=str, default="labels_ocatari.json",
         help="file path to the first json file with the results to be visualized")
 
     parser.add_argument("--file2", type=str, default=None,
@@ -27,12 +36,11 @@ def parse_args():
     parser.add_argument("--all_images", type=bool, default=False,
         help="if it is ture all frames will be safed")
     
-    parser.add_argument("--frame", type=int, default=-1,
-        help="the frame that will be visualized and safed, for -1 a random one will be chosen")
-    
     parser.add_argument("--resolution", type=int, default=84,
         help="the resolution of the image")
     
+    parser.add_argument("--save", type=bool, default=False)
+
     parser.add_argument("--output_path", type=str, default="images",
         help="the folder in which all the output is stores")
 
@@ -72,7 +80,7 @@ def visualize_frame(img, data1, data2, resolution, file1, file2):
 
     # in pong there are only 6 objects, for general visualization the loop would have to run till 256 for performance reasons it is now only till 20
     # 20 so it can still capture some errors of fastsam which sometimes labels objects with higher number
-    for i in range(1,20):
+    for i in range(1,256):
 
         # Object of number i might not exist
         try:
@@ -123,6 +131,10 @@ def figToNp(fig):
 if __name__ == "__main__":
     args = parse_args()
 
+    if args.batch_process:
+        path_to_cleanrl = os.path.join(os.path.dirname(__file__), '..')
+        args.path = path_to_cleanrl + "/batch_training/" + args.game + "/test_frames"
+
     plt.rcParams['figure.dpi'] = args.dpi
 
     data1 = json.load(open(args.path + '/' + args.file1))
@@ -164,8 +176,10 @@ if __name__ == "__main__":
             fig = visualize_frame(img, data1[frame], data2[frame], args.resolution, args.file1, args.file2)
         else:
             fig = visualize_frame(img, data1[frame], None, args.resolution, args.file1, None)
-
-        fig.savefig(args.output_path + "/frame" + str(frame) + ".png")
+            
+        plt.show()
+        if args.save:
+            fig.savefig(args.output_path + "/frame" + str(frame) + ".png")
 
 
 

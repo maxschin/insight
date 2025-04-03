@@ -11,16 +11,24 @@ OBJECT_ORDER = []
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--path", type=str, default="../sam_track/assets/Pong_input",
-        help="the path to the folder that contains both test and train datasets created with ocatari")
+    parser.add_argument("--batch_process", type=bool, default=True)
+
+    parser.add_argument("--game", type=str, default="Freeway")
+
+    parser.add_argument("--num_objs", type=int, default=20)
+
+    path_to_cleanrl = os.path.join(os.path.dirname(__file__), '..')
+
+    parser.add_argument("--path", type=str, default=path_to_cleanrl + "/batch_training/Freeway",
+        help="the path to the folder that contains both test and train datasets")
     
-    parser.add_argument("--ocatari_labels_path", type=str, default="ocatari_labels_Pong_dqn.csv",
+    parser.add_argument("--ocatari_labels_path", type=str, default="Freeway.csv",
         help="the path to the file that contains the ocatari labels for test and train data")
     
-    parser.add_argument("--train_labels_path", type=str, default="Pong_input_masks_train/labels_ocatari.json",
+    parser.add_argument("--train_labels_path", type=str, default="train_frames/labels_ocatari.json",
         help="the path where the file with the transformed ocatari train labels should be stored")
 
-    parser.add_argument("--test_labels_path", type=str, default="Pong_input_masks_test/labels_ocatari.json",
+    parser.add_argument("--test_labels_path", type=str, default="test_frames/labels_ocatari.json",
         help="the path where the file with the transformed ocatari test labels should be stored")
 
     parser.add_argument("--path_obj_order", type=str, default="object_order.json",
@@ -62,24 +70,8 @@ def __ocatari_regex(line):
     
     return objects
 
-# the regex has to be adjusted for each game individually as the names of the enteties change
-# old version
-def __ocatari_regex_pong(line):
-    # use regex to extract the data from the VIS column
-
-    enemy_score = re.findall(r"EnemyScore at \(.+?\), \(.+?\)", line['VIS'])
-    player_score = re.findall(r"PlayerScore at \(.+?\), \(.+?\)", line['VIS'])
-    enemy = re.findall(r"Enemy at \(.+?\), \(.+?\)", line['VIS'])
-    player = re.findall(r"Player at \(.+?\), \(.+?\)", line['VIS'])
-    ball = re.findall(r"Ball at \(.+?\), \(.+?\)", line['VIS'])
-
-    pong_objs = {"enemy_score": enemy_score, "player_score": player_score, "enemy": enemy, "player": player, "ball": ball}
-
-    return [pong_objs[PONG_OBJECT_ORDER[0]], pong_objs[PONG_OBJECT_ORDER[1]], pong_objs[PONG_OBJECT_ORDER[2]], 
-            pong_objs[PONG_OBJECT_ORDER[3]], pong_objs[PONG_OBJECT_ORDER[4]]]
-    
 # Loads the data from a file and extracts the position, size and existance from it
-def __load_ocatari_data(src):
+def __load_ocatari_data(src, num_objs):
     table = csv.DictReader(open(src))
     rows = list(table)
 
@@ -87,40 +79,38 @@ def __load_ocatari_data(src):
     
     # go through all lines in the csv file
     for j, line in enumerate(rows):
+        frame = []
 
         print("state: {0:7.3f}%".format((j/len(rows)) * 100), "{:<10}".format(""), end='\r')
 
         __find_object_names(line['VIS'])
         objects = __ocatari_regex(line['VIS'])
-        # objects = __ocatari_regex_pong(line)
 
         # turn data to int and fill missing objects with placeholder data -1 and mark as non existend 0.6
-        for i in range(0, len(objects)):
+        for objects_of_one_type in objects:
 
-            if len(objects[i]) >= 1:
+            for k in range(0, num_objs):
 
-                all_numbers = []
-                for j in range(0, len(objects[i])):
-                    all_numbers.append(__array_to_int(re.findall(r"\d+", objects[i][j])))
+                if k < len(objects_of_one_type):
+                    obj = objects_of_one_type[k]
+                    all_numbers = __array_to_int(re.findall(r"\d+", obj))
 
-                all_numbers = np.transpose(np.array(all_numbers))
+                    numbers_t = np.transpose(np.array(all_numbers))
 
-                numbers = [0,0,0,0]
-                numbers[0] = min(all_numbers[0])
-                numbers[1] = min(all_numbers[1])
+                    numbers = [0,0,0,0]
+                    numbers[0] = numbers_t[0]
+                    numbers[1] = numbers_t[1]
 
-                width = max(all_numbers[0] + all_numbers[2])
-                hight = max(all_numbers[1] + all_numbers[3])
+                    width = numbers_t[0] + numbers_t[2]
+                    hight = numbers_t[1] + numbers_t[3]
 
-                numbers[2] = width - numbers[0]
-                numbers[3] = hight - numbers[1]
+                    numbers[2] = width - numbers[0]
+                    numbers[3] = hight - numbers[1]
 
-                objects[i] = [(numbers[0], numbers[1]), (numbers[2], numbers[3]), (1)]
-            else:
-                objects[i] = [(-1,-1), (-1,-1), (0.6)] # Object does not exist
-
-        frames.append(objects)
-
+                    frame.append([(numbers[0], numbers[1]), (numbers[2], numbers[3]), (1)])
+                else:
+                    frame.append([(-1,-1), (-1,-1), (0.6)])
+        frames.append(frame)
     return frames
 
 # Arranges the data in the way the CNN uses, and normalizes it
@@ -212,13 +202,14 @@ def __store_json(json, src):
     f.close()
 
 def load_object_order(src):
-    if os.path.isfile(src):
-        file = open(src, 'r')
-        return json.loads(file.read())
+    file = open(src, 'r')
+    data = json.loads(file.read())
+    return data["object_order"], data["number_of_objects_per_type"]
+
 
 # loads ocatari labels from cvs file (src) and transforms it to the format the cnn uses
-def ocatari_to_cnn(src):
-    return __arrange_data_cnn(__load_ocatari_data(src))
+def ocatari_to_cnn(src, num_objs):
+    return __arrange_data_cnn(__load_ocatari_data(src, num_objs))
 
 
 def oca_obj_to_cnn_coords(oca_obj):
@@ -251,13 +242,13 @@ def oca_obj_to_cnn_coords(oca_obj):
     return output
 
 # loads ocatari labels from csv file (src) and transforms it to the format fastsam uses (splits the labels in test and training labels)
-def ocatari_to_fastsam(src, dst_train, dst_test, path_obj_order):
-    all_coord, all_shape, all_exist = ocatari_to_cnn(src)
+def ocatari_to_fastsam(src, dst_train, dst_test, path_obj_order, num_objs):
+    all_coord, all_shape, all_exist = ocatari_to_cnn(src, num_objs)
 
     json_train, json_test = __load_cnn_data(all_coord, all_shape, all_exist)
     __store_json(json_train, dst_train)
     __store_json(json_test, dst_test)
-    __store_json(json.dumps(OBJECT_ORDER), path_obj_order)
+    __store_json(json.dumps({"object_order": OBJECT_ORDER, "number_of_objects_per_type": num_objs}), path_obj_order)
 
 
 # takes the output of the cnn and transforms it into the format fastsam uses
@@ -273,11 +264,17 @@ def cnn_to_fastsam(coord, shape, exist, path):
 if __name__ == "__main__":
     args = parse_args()
 
-    OBJECT_ORDER = load_object_order(args.path + '/' + args.path_obj_order)
+    if args.batch_process:
+        path_to_cleanrl = os.path.join(os.path.dirname(__file__), '..')
 
-    print(OBJECT_ORDER)
+        args.path = path_to_cleanrl + "/batch_training/" + args.game
+        args.ocatari_labels_path = args.game + ".csv"
+    
+    if os.path.isfile(args.path + '/' + args.path_obj_order):
+        OBJECT_ORDER, args.num_objs = load_object_order(args.path + '/' + args.path_obj_order)
 
     ocatari_to_fastsam(args.path + '/' + args.ocatari_labels_path,
                        args.path + '/' + args.train_labels_path,
                        args.path + '/' + args.test_labels_path,
-                       args.path + '/' + args.path_obj_order)
+                       args.path + '/' + args.path_obj_order,
+                       args.num_objs)
