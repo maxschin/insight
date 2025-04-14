@@ -1,44 +1,10 @@
 #!/bin/bash
 
 # Default Dockerfile
-DOCKERFILE="Dockerfile"
-
-# Flags
-ALL_SET=false
-ORIGINAL_SET=false
-DETACHED=false
-
-# Process command line arguments
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --all)
-            ALL_SET=true
-            ;;
-        --original)
-            ORIGINAL_SET=true
-            ;;
-        --d)
-            DETACHED=true
-            ;;
-        *)
-            echo "Unknown parameter passed: $1"
-            exit 1
-            ;;
-    esac
-    shift
-done
-
-# Determine Dockerfile based on flags
-if $ALL_SET && $ORIGINAL_SET; then
-    DOCKERFILE="Dockerfile.all.original"
-elif $ALL_SET; then
-    DOCKERFILE="Dockerfile.all"
-elif $ORIGINAL_SET; then
-    DOCKERFILE="Dockerfile.true.original"
-fi
+DOCKERFILE="Dockerfile.eval"
 
 # Set the image name
-IMAGE_NAME="insight"
+IMAGE_NAME="insight_eval"
 
 # Define directories to be bind-mounted
 MOUNT_DIRS=(
@@ -78,10 +44,6 @@ SHM_SIZE="--shm-size=8G"
 echo "🚀 Building the image using $DOCKERFILE..."
 echo "Current directory: $(pwd)"
 podman build -t "$IMAGE_NAME" -f "$DOCKERFILE" .
-
-# Check shared memory available inside the container using a one-off run
-echo "🔍 Checking shared memory inside the container..."
-podman run --rm $GPU_FLAG $SHM_SIZE "$IMAGE_NAME" df -h /dev/shm
 
 # Run the container with bind mounts
 echo "🔄 Running the container with mounted directories..."

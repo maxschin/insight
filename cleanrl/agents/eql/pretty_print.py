@@ -347,6 +347,7 @@ def extract_equations(agent, variable_names, output_names, accuracy=0.001, thres
     outputs = []
     for expr, action_name in zip(expra, output_names):
         output = f"logits_{action_name} = {str(expr)}"
+        outputs.append(output)
         if print_out:
             print(output)
 

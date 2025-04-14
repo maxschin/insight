@@ -1,12 +1,20 @@
+import re
 import argparse
 import os
+from stable_baselines3.common.monitor import Monitor
 import torch
 import pandas as pd
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from hackatari_env import HackAtariWrapper  # Ensure this is correctly imported
+from hackatari_env import SyncVectorEnvWrapper  # Ensure this is correctly imported
+from hackatari_utils import get_reward_func_path
+from train_policy_atari import make_env, eval_policy
+import copy
+from visualize_utils import visual_for_ocatari_agent_videos
+from distutils.util import strtobool
+from tqdm import tqdm
+from rtpt import RTPT
 
 MODIFS = {
-  "Pong": ["default", "lazy_enemy"],
+  "PongNoFrameskip-v4": ["default", "lazy_enemy", "hidden_enemy", "up_drift", "left_drift"],
   "Freeway": [],
   "Seaquest": []
 }
@@ -14,18 +22,15 @@ MODIFS = {
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Atari agents from checkpoints.")
     parser.add_argument("--run_names", nargs="*", type=str, help="List of run names (filenames without extension).")
-    parser.add_argument("--record_eql", action="store_true", help="Flag to record equality check logs.")
-    parser.add_argument("--use_modifs", action="store_true", help="Flag to enable modifications.")
+    parser.add_argument("--record_eql", type=lambda x: bool(strtobool(x)), default=True, help="Flag to record equality check logs.")
+    parser.add_argument("--use_modifs", type=lambda x: bool(strtobool(x)), default=True, help="Flag to enable Hackatari modifications")
+    parser.add_argument("--n_envs_eval", type=int, default=4, help="Number of parallel envs to use for evaluation")
+    parser.add_argument("--n_eval_episodes", type=int, default=30, help="Number of episodes that returns should be collected on")
+    parser.add_argument("--n_record_steps", type=int, default=1000, help="Number of steps that should be taken per recording in environment")
+    parser.add_argument("--seed", type=int, default=21, help="The seed to use for the eval envs")
     return parser.parse_args()
 
-def make_env(env_name, seed, rewardfunc_path, modifs, index, is_eval=False, video_folder=None):
-    def thunk():
-        env = HackAtariWrapper(env_name, modifs=modifs, rewardfunc_path=rewardfunc_path)
-        env.reset(seed=seed)
-        return env
-    return thunk
-
-def load_checkpoints(run_names):
+def load_checkpoints(run_names, device="cpu"):
     checkpoint_list = []
     ckpt_dir = os.path.abspath("models/agents")
     
@@ -34,21 +39,25 @@ def load_checkpoints(run_names):
     else:
         filenames = [f for f in os.listdir(ckpt_dir) if f.endswith("_final.pth")]
         run_names = [f.rsplit("_final.pth", 1)[0] for f in filenames if "_final.pth" in f]
+        print(run_names)
     
     for filename in filenames:
         path = os.path.join(ckpt_dir, filename)
         if os.path.exists(path):
-            agent = torch.load(path)
-            run_name = filename.rsplit("_final.pth", 1)[0]
-            parts = run_name.split("_")
-            game = parts[0] if len(parts) > 0 else None
-            agent_type = parts[1] if len(parts) > 1 else None
-            reward_function = parts[2] if len(parts) > 2 else "default"
-            
+            agent = torch.load(path, weights_only=False, map_location=device)
+            match = re.match(r"^(?P<game>.*?)_Agent(?:_(?P<reward_function>.*?))?_final\.pth$", filename)
+            game = match.group("game")
+            reward_function = match.group("reward_function")
+            reward_function = reward_function if reward_function else "default"
+            run_name = f"{game}_Agent_{reward_function}" if reward_function else game
+
+            print("Game:", game)
+            print("Reward function:", reward_function or None)
+            print("Run name:", run_name)
             checkpoint_list.append({
                 "run_name": run_name,
                 "agent": agent,
-                "agent_type": agent_type,
+                "agent_type": "Agent",
                 "game": game,
                 "reward_function": reward_function
             })
@@ -105,33 +114,87 @@ def evaluate_agent(agent, env, episodes=10, actor="neural", device="cpu"):
 
 def main():
     args = parse_args()
-    checkpoints = load_checkpoints(args.run_names)
+
+    # check if running inside container
+    containerized = os.environ.get("container") == "podman"
+    if containerized:
+        print("Running inside container")
+    else:
+        args.n_envs_eval = 4
+        args.n_eval_episodes = 1
+        args.use_modifs = False
+        print("Running locally")
+
+    # get device and then load agent
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoints = load_checkpoints(args.run_names, device=device)
+
+    # insert args for make_env etc
+    args.resolution = 84
+    args.threshold = 0.5
+    args.gray = True
     
-    for checkpoint in checkpoints:
-        name = checkpoint["run_name"]
-        agent = checkpoint.pop("agent")  # Remove agent to avoid storing it in the DataFrame
-        game = checkpoint["game"]
-        
-        modifications = MODIFS.get(game, ["default"]) if args.use_modifs else ["default"]
-        for modif in modifications:
-            env = SubprocVecEnv([make_env(game, seed=42, rewardfunc_path=checkpoint["reward_function"], modifs=[modif] if modif != "default" else [], index=i) for i in range(4)])
+    final_datapoints = []
+    
+    # iterate over all final checkpoints of agents to evaluate
+    rtpt = RTPT(name_initials="MS", experiment_name="INSIGHT_EVAL", max_iterations=len(checkpoints))
+    rtpt.start()
+    with tqdm(total=len(checkpoints), desc="Evaluating trained agents") as pbar:
+        for checkpoint in checkpoints:
+            # extract meta-info
+            name = checkpoint["run_name"]
+            print(f"RUN NAME: {name}")
+            agent = checkpoint.pop("agent")  # Remove agent to avoid storing it in the DataFrame
+            game = checkpoint["game"]
+            args.game = game
+            reward_function = checkpoint["reward_function"]
+
+            # load reward function to evaluate episode rewards
+            rewardfunc_path = get_reward_func_path(game, reward_function) if reward_function != "default" else None
             
-            modif_key = modif if modif != "default" else ""
-            checkpoint[f"{modif_key}_neural" if modif_key else "neural"] = evaluate_agent(agent, env, episodes=10, actor="neural")
-            checkpoint[f"{modif_key}_eql" if modif_key else "eql"] = evaluate_agent(agent, env, episodes=10, actor="eql")
-            
-            if args.record_eql:
-                base_folder = 'ppoeql_ocatari_videos'
-                os.makedirs(base_folder, exist_ok=True)
-                run_folder = os.path.join(base_folder, name, modif if modif != "default" else "baseline")
-                os.makedirs(run_folder, exist_ok=True)
-                record_folder = os.path.join(run_folder, 'eval')
-                os.makedirs(record_folder, exist_ok=True)
+            # evaluate per modification available
+            modifications = MODIFS.get(game, ["default"]) if args.use_modifs else ["default"]
+            for modif in modifications:
+                print(f"MOD: {modif}")
+                # one modification, one line in the df...
+                data_point = copy.deepcopy(checkpoint)
+                data_point["modif"] = modif
+                modif_list = [modif] if modif != "default" else []
+
+                # set up envs for evaluation and recording
+                envs = SyncVectorEnvWrapper(
+                    [make_env(args.game, args.seed + i, args, rewardfunc_path, modifs=modif_list) for i in range(args.n_envs_eval)])
+
+                # always record statistics for both types of agents
+                for agent_type in ["neural", "eql"]:
+                    print(agent_type)
+                    action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor=agent_type)[0]
+                    mean_episode_reward, mean_episode_length = eval_policy(envs, action_func, device=device, n_episode=args.n_eval_episodes)
+                    data_point[f"{agent_type}_returns"] = mean_episode_reward
+                    data_point[f"{agent_type}_length"] = mean_episode_length
+
+                # store differences between neural and eql agents
+                data_point["eql_neural_reward_diff"] = data_point["eql_returns"] - data_point["neural_returns"]
+                data_point["eql_neural_length_diff"] = data_point["eql_length"] - data_point["neural_length"]
+
+                print(data_point)
+                final_datapoints.append(data_point)
                 
-                label = f"{checkpoint['reward_function']}_{modif}" if modif != "default" else checkpoint['reward_function']
-                visual_for_ocatari_agent_videos(env, agent, "cpu", args, record_folder, n_step=1000, actor="eql", label=label)
+                if args.record_eql:
+                    print("Starting recording")
+                    base_folder = 'ppoeql_ocatari_videos'
+                    os.makedirs(base_folder, exist_ok=True)
+                    run_folder = os.path.join(base_folder, name)
+                    os.makedirs(run_folder, exist_ok=True)
+                    record_folder = os.path.join(run_folder, 'eval')
+                    os.makedirs(record_folder, exist_ok=True)
+                    
+                    label = f"{checkpoint['reward_function']}_{modif}" if modif != "default" else checkpoint['reward_function']
+                    visual_for_ocatari_agent_videos(envs, agent, device, args, record_folder, n_step=args.n_record_steps, actor="eql", label=label)
+        pbar.update(1)
+        rtpt.step()
     
-    df = pd.DataFrame(checkpoints)
+    df = pd.DataFrame(final_datapoints)
     df.to_csv("evaluation_results.csv", index=False)
     print("Saved evaluation results to evaluation_results.csv")
 

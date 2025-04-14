@@ -6,6 +6,7 @@ import torch
 import agents.eql.pretty_print as pretty_print
 from agents.agent import Agent
 import sympy as sy
+from hackatari_utils import save_equations
 from hackatari_env import HackAtariWrapper, SyncVectorEnvWrapper
 
 # get all meta
@@ -13,7 +14,7 @@ var_names = SyncVectorEnvWrapper.get_variable_names_hardcoded_pong()
 output_names = ["NOOP_1", "NOOP_2", "UP_1", "DOWN_1", "UP_2", "DOWN_2"]
 
 # load agent
-path = "../results_saved/agents/PongNoFrameskip-v4_Agent_final.pth"
+path = "../results_saved/agents/PongNoFrameskip-v4_Agent_close_but_no_hit_rf_final.pth"
 device = torch.device("cpu")
 agent = torch.load(path, weights_only=False, map_location=device)
 
@@ -28,20 +29,16 @@ agent_in_dim = 2048
 #)
 
 # extract equations as strings and symbolic expressions
-start_time = time.time()
 outputs, expra = pretty_print.extract_equations(
     agent,
     var_names,
     output_names,
-    accuracy=0.01,
-    threshold=0.05,
+    accuracy=0.001,
+    threshold=0.01,
     use_multiprocessing=True
 )
-elapsed_time = time.time() - start_time
-print(f"Extracting equations took {elapsed_time:.4f} seconds")
-for output in outputs:
-    print(output)
 
+# save_equations(outputs, ".", "test_run")
 
 # Number of random samples to evaluate
 n_samples = 1000

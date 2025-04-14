@@ -4,7 +4,7 @@ metadrive/
 wandb/
 
 cleanrl/eval/
-cleanrl/models/agents/
+cleanrl/models/CNN/
 cleanrl/ppo_continuous_action_isaacgym/
 cleanrl/runs/
 cleanrl/ppoeql_ocatari_videos/

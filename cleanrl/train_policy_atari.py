@@ -185,13 +185,14 @@ def parse_args():
     
 
 
-def make_env(game, seed, args, rewardfunc_path):
+def make_env(game, seed, args, rewardfunc_path, modifs=[]):
     def thunk():
         env = HackAtariWrapper(
             game,
             rewardfunc_path=rewardfunc_path,
             obs_mode="ori",
-            frameskip=1
+            frameskip=1,
+            modifs=modifs
         )
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = NoopResetEnv(env, noop_max=30)
