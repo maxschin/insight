@@ -4,8 +4,8 @@ import os
 from stable_baselines3.common.monitor import Monitor
 import torch
 import pandas as pd
-from hackatari_env import SyncVectorEnvWrapper  # Ensure this is correctly imported
-from hackatari_utils import get_reward_func_path
+from utils.hackatari_env import SyncVectorEnvWrapper  # Ensure this is correctly imported
+from utils.hackatari_utils import get_reward_func_path
 from train_policy_atari import make_env, eval_policy
 import copy
 from visualize_utils import visual_for_ocatari_agent_videos
@@ -177,7 +177,6 @@ def main():
                 data_point["eql_neural_reward_diff"] = data_point["eql_returns"] - data_point["neural_returns"]
                 data_point["eql_neural_length_diff"] = data_point["eql_length"] - data_point["neural_length"]
 
-                print(data_point)
                 final_datapoints.append(data_point)
                 
                 if args.record_eql:

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Change to the cleanrl directory
-cd cleanrl
+# Change to the cleanrl/train directory
+cd cleanrl/train
 
 # List of games (exactly as specified)
 games=("PongNoFrameskip-v4" "SeaquestNoFrameskip-v4" "MsPacmanNoFrameskip-v4" "SpaceInvadersNoFrameskip-v4" "FreewayNoFrameskip-v4")

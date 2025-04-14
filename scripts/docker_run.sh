@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Default Dockerfile
-DOCKERFILE="Dockerfile"
+DOCKERFILE="docker/Dockerfile"
 
 # Flags
 ALL_SET=false
@@ -30,11 +30,11 @@ done
 
 # Determine Dockerfile based on flags
 if $ALL_SET && $ORIGINAL_SET; then
-    DOCKERFILE="Dockerfile.all.original"
+    DOCKERFILE="docker/Dockerfile.all.original"
 elif $ALL_SET; then
-    DOCKERFILE="Dockerfile.all"
+    DOCKERFILE="docker/Dockerfile.all"
 elif $ORIGINAL_SET; then
-    DOCKERFILE="Dockerfile.true.original"
+    DOCKERFILE="docker/Dockerfile.true.original"
 fi
 
 # Set the image name

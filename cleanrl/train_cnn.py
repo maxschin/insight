@@ -20,7 +20,7 @@ import cv2
 import time
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from visualize_utils import images_to_video
+from utils.visualize_utils import images_to_video
 from distutils.util import strtobool
 from collections import defaultdict
 import warnings

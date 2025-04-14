@@ -1,32 +1,28 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_ataripy
-import argparse
 import os
+import sys
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(SRC)
+
+import argparse
 import random
 import time
 from distutils.util import strtobool
 import gymnasium as gym
 import numpy as np
-from stable_baselines3.common.monitor import Monitor
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    NoopResetEnv,
-)
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from agents.eql.regularization import L12Smooth
 from agents.eql.pretty_print import extract_equations
 from agents.agent import load_agent
-from hackatari_env import HackAtariWrapper
-from hackatari_utils import save_equations, get_reward_func_path
+from utils.hackatari_env import HackAtariWrapper
+from utils.utils import save_equations, get_reward_func_path, make_env, eval_policy
 
 from torch.nn import CrossEntropyLoss
 
-from visualize_utils import visual_for_ocatari_agent_videos
+from utils.visualize_utils import visual_for_ocatari_agent_videos
 from tqdm import tqdm
 from rtpt import RTPT
 
@@ -124,46 +120,6 @@ def parse_args():
     # fmt: on
     return args
 
-def make_env(env_name, seed,rewardfunc_path, modifs):
-    def thunk():
-        env = HackAtariWrapper(env_name, modifs=modifs, rewardfunc_path=rewardfunc_path)  
-        env = Monitor(env)
-        env = NoopResetEnv(env, noop_max=30) 
-        # env = MaxAndSkipEnv(env, skip=4) -> done by hackatari by default
-        #env = EpisodicLifeEnv(env)
-        #env = FireResetEnv(env)
-        #env = ClipRewardEnv(env)
-        env.reset(seed=seed)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
-    return thunk
-
-def eval_policy(envs, action_func, device="cuda", n_episode=10):
-    obs = envs.reset()
-    total_return = 0.0
-    total_length = 0.0
-    total_episodes = 0
-
-    while total_episodes<n_episode:
-        obs_tensor = torch.Tensor(obs).to(device)
-        with torch.no_grad():
-            action = action_func(obs_tensor)
-        obs, rewards, dones, infos = envs.step(action.cpu().numpy())
-
-        done_indices = np.nonzero(dones)[0]
-        if done_indices.size > 0:
-            episode_returns = np.array([infos[i]["episode"]["r"] for i in done_indices])
-            episode_lengths = np.array([infos[i]["episode"]["l"] for i in done_indices])
-            total_return += episode_returns.sum()
-            total_length += episode_lengths.sum()
-            total_episodes += len(done_indices)
-    avg_return = total_return / total_episodes
-    avg_length = total_length / total_episodes
-
-    return avg_return, avg_length
-
-
 if __name__ == "__main__":
     args = parse_args()
 
@@ -199,7 +155,27 @@ if __name__ == "__main__":
     else:
         run_name = args.run_name
     print(f"RUN NAME: {run_name}")
-    writer = SummaryWriter(f"runs/{run_name}")
+
+    # Setup directory for saving equations and visualizations
+    base_folder = os.path.join(SRC, 'ppoeql_ocatari_videos')
+    os.makedirs(base_folder, exist_ok=True)
+    run_folder = os.path.join(base_folder, run_name)
+    os.makedirs(run_folder, exist_ok=True)
+    test_folder = os.path.join(run_folder, 'test')
+    record_folder = os.path.join(run_folder, 'record')
+    os.makedirs(test_folder, exist_ok=True)
+    os.makedirs(record_folder, exist_ok=True)
+    # equations
+    equations_folder = os.path.join(SRC, "equations")
+    os.makedirs(equations_folder, exist_ok=True)
+    # model checkpoints
+    os.makedirs(os.path.join(SRC, "models/agents"), exist_ok=True)
+    ckpt_dir = os.path.abspath(os.path.join(SRC, "models/agents"))
+
+    # tensorboard logs
+    tensorboard_log_dir = os.path.join(SRC, f"runs/{run_name}")
+    os.makedirs(tensorboard_log_dir, exist_ok=True)
+    writer = SummaryWriter(tensorboard_log_dir)
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -217,13 +193,12 @@ if __name__ == "__main__":
     # Setup multiple OCAtari environments
     rewardfunc_path = get_reward_func_path(args.game, args.reward_function) if args.reward_function else None
     envs = SubprocVecEnv(
-        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs)], start_method="fork")
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, sb3=True) for i in range(args.num_envs)], start_method="fork")
     envs_eval = SubprocVecEnv(
-        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs // 2)], start_method="fork")
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, sb3=True) for i in range(args.num_envs // 2)], start_method="fork")
     assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent_in_dim = envs.env_method("get_ns_out_dim", indices=[0])[0]
-
 
     # instatintiate agent
     agent_class = load_agent(args.agent_type, for_sb3=False)
@@ -255,22 +230,9 @@ if __name__ == "__main__":
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
-    # Setup directory for saving equations and visualizations
-    base_folder = 'ppoeql_ocatari_videos'
-    os.makedirs(base_folder, exist_ok=True)
-    run_folder = os.path.join(base_folder, run_name)
-    os.makedirs(run_folder, exist_ok=True)
-    test_folder = os.path.join(run_folder, 'test')
-    record_folder = os.path.join(run_folder, 'record')
-    os.makedirs(test_folder, exist_ok=True)
-    os.makedirs(record_folder, exist_ok=True)
-    equations_folder = "equations"
-    os.makedirs(equations_folder, exist_ok=True)
-
     # also do rtpt tracking
     rtpt = RTPT(name_initials="MS", experiment_name="INSIGHT", max_iterations=num_updates)
     rtpt.start()
-
 
     with tqdm(total=num_updates, desc="Training Progress") as pbar:
         for update in range(1, num_updates + 1): # by default ~10000 updates
@@ -279,7 +241,7 @@ if __name__ == "__main__":
                 if args.ng:
                     action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor="eql")[0]
                     eql_returns, eql_lengths = eval_policy(
-                        envs_eval, action_func, device=device)
+                        envs_eval, action_func, device=device, sb3=True)
                     writer.add_scalar(
                         "charts/eql_returns", eql_returns, global_step)
                     writer.add_scalar(
@@ -295,7 +257,8 @@ if __name__ == "__main__":
                 video_path = visual_for_ocatari_agent_videos(envs_eval, agent, device, args, test_folder, actor="neural")
 
                 if args.save:
-                    torch.save(agent, 'models/agents/'+run_name+'.pth')
+                    ckpt_path = os.path.join(ckpt_dir, f"{run_name}_train.pth")
+                    torch.save(agent, ckpt_path)
 
             # Annealing
             frac = 1.0 - (update - 1.0) / num_updates
@@ -483,7 +446,8 @@ if __name__ == "__main__":
             rtpt.step()
 
     if args.save:
-        torch.save(agent, 'models/agents/'+run_name+'.pth')
+        ckpt_path = os.path.join(ckpt_dir, f"{run_name}_final.pth")
+        torch.save(agent, ckpt_path)
 
     # record both neural and eql agent
     video_path = visual_for_ocatari_agent_videos(envs_eval, agent, device, args, record_folder, actor="eql", n_step=2000, label="final")

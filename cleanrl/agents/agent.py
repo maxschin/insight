@@ -17,6 +17,10 @@ torch.serialization.add_safe_globals([Normal_Cnn.OD_frames_gray2, nn.Sequential,
 from .eql import functions
 from .eql.symbolic_network import SymbolicNet, SymbolicNetSimplified
 
+# main directory
+import os
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 import copy
 
 def load_agent(class_name, for_sb3=False):
@@ -123,7 +127,8 @@ class Agent(nn.Module):
             nn.Linear(512, 1))
         if not skip_perception and args.load_cnn:
             print('load cnn')
-            self.network = torch.load('models/CNN/'+f'{args.game}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl', map_location=device)
+            model_path = os.path.join(SRC,'models/CNN/'+f'{args.game}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl') 
+            self.network = torch.load(model_path, map_location=device)
             print(f"CNN loaded to: {next(self.network.parameters()).device}")
         self.deter_action = args.deter_action
         self.nnagent= nnagent
