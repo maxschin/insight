@@ -1,3 +1,7 @@
+import os
+import sys
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 from ocatari.core import OCAtari
 import random
 
@@ -13,8 +17,9 @@ parser.add_argument("--frames", type=int, default=10000)
 
 args = parser.parse_args()
 
-if not os.path.isdir("batch_training/" + args.game):
-    os.mkdir("batch_training/" + args.game)
+target_dir = os.path.join(SRC, "batch_training/" + args.game)
+if not os.path.isdir(target_dir):
+    os.mkdir(target_dir)
 
 env = OCAtari(args.game, mode="both", hud=True, render_mode="rgb_array")
 env.metadata['render_fps'] = 30
@@ -55,7 +60,9 @@ for i in tqdm(range(args.frames)):
 env.close()
 
 clip = ImageSequenceClip(recorded_frames, fps=30)
-clip.write_videofile("batch_training/" + args.game + "/" + args.game + ".mp4")
+video_file_path = os.path.join(target_dir, args.game + ".mp4")
+clip.write_videofile(video_file_path)
 
 df = pd.DataFrame(dataset, columns=['INDEX', 'RAM', 'HUD', 'VIS'])
-df.to_csv("batch_training/" + args.game + "/" + args.game + ".csv", index=False)
+csv_file_path = os.path.join(target_dir, args.game + ".csv")
+df.to_csv(csv_file_path, index=False)

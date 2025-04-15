@@ -1,8 +1,11 @@
+import os
+import sys
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 import argparse
 import matplotlib.image
 import matplotlib.pyplot as plt
 import cv2
-import os
 
 from tqdm import tqdm
 
