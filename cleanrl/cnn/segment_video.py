@@ -27,9 +27,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     if args.batch_process:
-        path_to_cleanrl = os.path.join(os.path.dirname(__file__), '..')
-
-        args.game_folder = path_to_cleanrl + "/batch_training/" + args.game + '/' 
+        args.game_folder = os.path.join(SRC, "batch_training/" + args.game + '/')
         args.video_name = args.game + ".mp4"
 
     path = args.game_folder
@@ -39,11 +37,13 @@ if __name__ == "__main__":
     video_name = args.video_name
     resolution = args.resolution
 
-    if not os.path.isdir(path + train_frames):
-        os.mkdir(path + train_frames)
+    train_folder = os.path.join(path, train_frames)
+    test_folder = os.path.join(path, test_frames)
+    if not os.path.isdir(train_folder):
+        os.mkdir(train_folder)
 
-    if not os.path.isdir(path + test_frames):
-        os.mkdir(path + test_frames)
+    if not os.path.isdir(test_folder):
+        os.mkdir(test_folder)
 
     cap = cv2.VideoCapture(path + video_name)
     fps = cap.get(cv2.CAP_PROP_FPS)

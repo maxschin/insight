@@ -5,6 +5,7 @@ cd cleanrl
 
 # define list of games for which pretraining should occur
 games=("PongNoFrameskip-v4" "SeaquestNoFrameskip-v4" "MsPacmanNoFrameskip-v4" "SpaceInvadersNoFrameskip-v4" "FreewayNoFrameskip-v4")
+games=("SeaquestNoFrameskip-v4" "SpaceInvadersNoFrameskip-v4")
 
 echo "=== Starting batch processing for all games ==="
 
@@ -14,8 +15,6 @@ for game in "${games[@]}"; do
     echo "Generating dataset for $game..."
     python cnn/generate_dataset.py --game="$game"
 done
-
-exit 0
 
 # segmenting videos
 echo "--- Segmenting videos ---"
@@ -30,6 +29,7 @@ for game in "${games[@]}"; do
     echo "Transforming data for $game..."
     python cnn/transform_data.py --game="$game"
 done
+exit 0
 
 # training cnn
 echo "--- Training CNN ---"
