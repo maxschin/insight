@@ -25,6 +25,8 @@ from distutils.util import strtobool
 from collections import defaultdict
 import warnings
 
+from distutils.util import strtobool
+
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
@@ -42,7 +44,7 @@ def parse_args():
         help="lr")
     parser.add_argument("--torch-deterministic", type=bool, default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--track", type=bool, default=True,
+    parser.add_argument("--track", type=strtobool, default=False,
         help="if toggled, this experiment will be tracked with Weights and Biases")
     parser.add_argument("--wandb-project-name", type=str, default="Train_CNN",
         help="the wandb's project name")
@@ -71,7 +73,9 @@ def parse_args():
     parser.add_argument("--run-name", type=str, default=None,
         help="the defined run_name")
 
-    parser.add_argument("--batch_process", type=bool, default=True)
+    parser.add_argument("--batch_process", type=strtobool, default=True)
+
+
     parser.add_argument("--game", type=str, default="Freeway")
 
     path_to_cleanrl = os.path.join(os.path.dirname(__file__))
@@ -313,6 +317,7 @@ if __name__ == '__main__':
     else:
         run_name = args.run_name
     if args.track:
+
         import wandb
 
         wandb.init(
@@ -364,7 +369,10 @@ if __name__ == '__main__':
     else:
         model = OD_frames(args).to(device)
     if args.resume:
-        model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
+        if args.batch_process:
+            model = torch.load(args.model_path)
+        else:
+            model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
     
     optm = Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     if args.coordinate_loss == "l2":
@@ -374,6 +382,7 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError
     
+    print(args.epoch)
     all_epoch = args.epoch
     start_time = time.time() 
     for current_epoch in range(all_epoch):
@@ -460,7 +469,7 @@ if __name__ == '__main__':
                 print(f'epoch:{current_epoch} coordinate loss: {acc}')
 
             if args.batch_process:
-                torch.save(mode, args.model_path)
+                torch.save(model, args.model_path)
             else:
                 torch.save(model, 'models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
 
@@ -480,7 +489,10 @@ if __name__ == '__main__':
     test_dataset = CustomImageDataset(images_dir_test,labels_test,args,train_flag=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
-    model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
+    if args.batch_process:
+        model = torch.load(args.model_path)
+    else:
+        model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
 
     optm = Adam(model.parameters(), lr=args.lr)
     all_epoch = 1
