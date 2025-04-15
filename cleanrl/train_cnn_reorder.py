@@ -25,6 +25,8 @@ from distutils.util import strtobool
 from collections import defaultdict
 import warnings
 
+from distutils.util import strtobool
+
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
@@ -42,7 +44,7 @@ def parse_args():
         help="lr")
     parser.add_argument("--torch-deterministic", type=bool, default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--track", type=bool, default=True,
+    parser.add_argument("--track", type=strtobool, default=False,
         help="if toggled, this experiment will be tracked with Weights and Biases")
     parser.add_argument("--wandb-project-name", type=str, default="Train_CNN",
         help="the wandb's project name")
@@ -70,12 +72,21 @@ def parse_args():
         help="resume from existing ckpt.")
     parser.add_argument("--run-name", type=str, default=None,
         help="the defined run_name")
+
+    parser.add_argument("--batch_process", type=strtobool, default=True)
+
+
+    parser.add_argument("--game", type=str, default="Freeway")
+
+    path_to_cleanrl = os.path.join(os.path.dirname(__file__))
     
-    parser.add_argument("--train_path", type=str, default="./sam_track/assets/Pong_input/Pong_input_masks_train")
+    parser.add_argument("--train_path", type=str, default=path_to_cleanrl + "/batch_training/Freeway/train_frames")
     parser.add_argument("--train_labels", type=str, default="labels_ocatari.json")
 
-    parser.add_argument("--test_path", type=str, default="./sam_track/assets/Pong_input/Pong_input_masks_test")
+    parser.add_argument("--test_path", type=str, default=path_to_cleanrl + "/batch_training/Freeway/test_frames")
     parser.add_argument("--test_labels", type=str, default="labels_ocatari.json")
+
+    parser.add_argument("--model_path", type=str, default=path_to_cleanrl + "/batch_training/Freeway/cnn.pkl")
     
     parser.add_argument("--coordinate_loss", type=str, default="l1")
     parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -199,6 +210,7 @@ class CustomImageDataset(Dataset):
             bboxes.append(frame_bboxes)
             img_path = os.path.join(self.img_dir, f'frame{frame_idx}.png')
             image = cv2.imread(img_path)
+
             #turn from BGR to RGB
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             images.append(image)
@@ -291,6 +303,13 @@ def coordinate_label_to_existence_label(
 if __name__ == '__main__':
     #record
     args = parse_args()
+
+    if args.batch_process:
+        path_to_cleanrl = os.path.join(os.path.dirname(__file__))
+        args.test_path = path_to_cleanrl + "/batch_training/" + args.game + "/test_frames"
+        args.train_path = path_to_cleanrl + "/batch_training/" + args.game + "/train_frames"
+        args.model_path = path_to_cleanrl + "/batch_training/" + args.game +"/cnn.pkl"
+
     best_acc = 9999
     best_avg_precision = 0
     if args.run_name is None:
@@ -298,6 +317,7 @@ if __name__ == '__main__':
     else:
         run_name = args.run_name
     if args.track:
+
         import wandb
 
         wandb.init(
@@ -349,7 +369,10 @@ if __name__ == '__main__':
     else:
         model = OD_frames(args).to(device)
     if args.resume:
-        model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
+        if args.batch_process:
+            model = torch.load(args.model_path)
+        else:
+            model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
     
     optm = Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     if args.coordinate_loss == "l2":
@@ -359,6 +382,7 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError
     
+    print(args.epoch)
     all_epoch = args.epoch
     start_time = time.time() 
     for current_epoch in range(all_epoch):
@@ -443,7 +467,11 @@ if __name__ == '__main__':
             if acc < best_acc:
                 best_acc = acc
                 print(f'epoch:{current_epoch} coordinate loss: {acc}')
-            torch.save(model, 'models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
+
+            if args.batch_process:
+                torch.save(model, args.model_path)
+            else:
+                torch.save(model, 'models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
 
         epoch_end_time = time.time()
         elapsed_time_per_epoch = epoch_end_time - epoch_start_time
@@ -461,7 +489,10 @@ if __name__ == '__main__':
     test_dataset = CustomImageDataset(images_dir_test,labels_test,args,train_flag=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
-    model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
+    if args.batch_process:
+        model = torch.load(args.model_path)
+    else:
+        model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
 
     optm = Adam(model.parameters(), lr=args.lr)
     all_epoch = 1

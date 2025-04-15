@@ -36,7 +36,7 @@ test_parser.add_argument("-dqn", "--dqn", action="store_true",
 opts = test_parser.parse_args()
 
 # Init the environment
-env = OCAtari(opts.game, mode="both", render_mode='rgb_array', hud=True)
+env = OCAtari(opts.game, mode="both", render_mode='rgb_array', hud=True) # TODO hud=False, mode=both might be wrong, change to obj # TODO frame stacking object centric returns 
 observation, info = env.reset()
 
 # Set up an agent
