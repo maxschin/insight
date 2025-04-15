@@ -151,7 +151,7 @@ if __name__ == "__main__":
             run_name += f"_{args.reward_function}"
         if args.modifs:
             run_name += f"_{''.join(args.modifs)}"
-        #run_name+=f"_seed{args.seed}"
+        run_name += "_oc" # denotes object-centric agent
     else:
         run_name = args.run_name
     print(f"RUN NAME: {run_name}")
@@ -189,13 +189,12 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    
     # Setup multiple OCAtari environments
     rewardfunc_path = get_reward_func_path(args.game, args.reward_function) if args.reward_function else None
     envs = SubprocVecEnv(
-        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, sb3=True) for i in range(args.num_envs)], start_method="fork")
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs)], start_method="fork")
     envs_eval = SubprocVecEnv(
-        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, sb3=True) for i in range(args.num_envs // 2)], start_method="fork")
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs // 2)], start_method="fork")
     assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent_in_dim = envs.env_method("get_ns_out_dim", indices=[0])[0]
@@ -241,7 +240,7 @@ if __name__ == "__main__":
                 if args.ng:
                     action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor="eql")[0]
                     eql_returns, eql_lengths = eval_policy(
-                        envs_eval, action_func, device=device, sb3=True)
+                        envs_eval, action_func, device=device)
                     writer.add_scalar(
                         "charts/eql_returns", eql_returns, global_step)
                     writer.add_scalar(

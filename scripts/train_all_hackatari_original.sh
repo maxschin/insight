@@ -40,7 +40,6 @@ for game in "${games[@]}"; do
     # Iterate over each reward function defined in the associative array.
     for reward in "${!config[@]}"; do
         timesteps=${config[$reward]}
-        timesteps=10
         # Determine the reward parameter to pass:
         if [ "$reward" == "default" ]; then
             echo "Training $game using default reward function with timesteps: $timesteps"

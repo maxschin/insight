@@ -1,2 +1,0 @@
-run_name,agent_type,game,reward_function,modif,neural_returns,neural_length,eql_returns,eql_length,eql_neural_reward_diff,eql_neural_length_diff
-PongNoFrameskip-v4_Agent_default,Agent,PongNoFrameskip-v4,default,default,21.0,6595.0,21.0,6789.0,0.0,194.0

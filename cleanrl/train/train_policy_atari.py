@@ -36,6 +36,7 @@ import itertools
 import sympy as sy
 from agents.eql.pretty_print import extract_equations
 from rtpt import RTPT
+from stable_baselines3.common.vec_env import SubprocVecEnv
 
 def parse_args():
     # fmt: off
@@ -189,6 +190,7 @@ if __name__ == "__main__":
             run_name += f"_{args.reward_function}"
         if args.modifs:
             run_name += f"_{''.join(args.modifs)}"
+        run_name += "_e2e" # denotes that pix-to-act agent is used
     else:
         run_name = args.run_name
     print("RUN NAME: " + run_name)
@@ -237,17 +239,16 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     print(f"Device: {device.type}")
 
-
     # env setup
     rewardfunc_path = get_reward_func_path(args.game, args.reward_function) if args.reward_function else None
-    envs = SyncVectorEnvWrapper(
-        [make_env(args.game, args.seed + i, rewardfunc_path, sb3=False, pix=True, args=args) for i in range(args.num_envs)])
-    envs_eval = SyncVectorEnvWrapper(
-        [make_env(args.game, args.seed + i, rewardfunc_path, sb3=False, pix=True, args=args) for i in range(args.num_envs)])
-    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    envs = SubprocVecEnv(
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, pix=True, args=args) for i in range(args.num_envs)], start_method="fork")
+    envs_eval = SubprocVecEnv(
+        [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, pix=True, args=args) for i in range(args.num_envs // 2)], start_method="fork")
+    assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
     
     n_funcs=args.n_funcs
-    n_actions = envs.single_action_space.n
+    n_actions = envs.action_space.n
     if args.pre_nn_agent:
         if args.pnn_guide:
             print('pnn_guide')
@@ -287,8 +288,8 @@ if __name__ == "__main__":
     regularization = L12Smooth()
     loss_distill = CrossEntropyLoss()
     # ALGO Logic: Storage setup
-    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
+    obs = torch.zeros((args.num_steps, args.num_envs) + envs.observation_space.shape).to(device)
+    actions = torch.zeros((args.num_steps, args.num_envs) + envs.action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -297,7 +298,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs, _ = envs.reset()
+    next_obs, info = envs.reset(), envs.reset_infos
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
@@ -351,7 +352,7 @@ if __name__ == "__main__":
                 if args.ng:
                     action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor="eql")[0]
                     eql_returns, eql_lengths = eval_policy(
-                        envs_eval, action_func, device=device, sb3=False)
+                        envs_eval, action_func, device=device)
                     writer.add_scalar(
                         "charts/eql_returns", eql_returns, global_step)
                     writer.add_scalar(
@@ -359,7 +360,7 @@ if __name__ == "__main__":
                 agent.network.train()
                 writer.add_scalar("losses/test_cnn_dataset_loss", acc/len(test_loader), global_step)
             if update%max(int(num_updates/10), 1) ==0 or update==1:
-                video_path = visual_for_agent_videos(envs_eval, agent, next_obs, device, args,run_name, test_folder, threshold=args.threshold)
+                visual_for_ocatari_agent_videos(envs_eval, agent, device, args, record_folder, actor="neural", n_step=200, label=f"train_{str(update)}")
                 if args.save:
                     ckpt_path = os.path.join(ckpt_dir, f"{run_name}_train.pth")
                     torch.save(agent, ckpt_path)
@@ -401,20 +402,26 @@ if __name__ == "__main__":
 
 
                 # TRY NOT TO MODIFY: execute the game and log data.
-                next_obs, reward, done, _, info = envs.step(action.cpu().numpy())
+                next_obs, reward, done, info = envs.step(action.cpu().numpy())
                 
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
-                if "episode" in info and "_episode" in info:
-                    # Use the '_episode' boolean array as a mask to select finished episodes.
-                    done_mask = info["_episode"]
-                    done_indices = np.nonzero(done_mask)[0]
-                    if done_indices.size > 0:
-                        ep_returns = info["episode"]["r"][done_indices]
-                        ep_lengths = info["episode"]["l"][done_indices]
-                        writer.add_scalar("charts/episodic_return", np.mean(ep_returns), global_step)
-                        writer.add_scalar("charts/episodic_length", np.mean(ep_lengths), global_step)
+                if "final_info" in info:
+                    episode_return = 0.
+                    episode_length = 0.
+                    n_episode = 0 
+                    for env_id, env_info in enumerate(info["final_info"]):
+                        if not env_info is None:
+                            if "episode" in env_info:
+                                episode_return += env_info["episode"]["r"]
+                                episode_length += env_info["episode"]["l"]
+                                n_episode += 1.
+                    if n_episode > 0:
+                        episode_return /= n_episode
+                        episode_length /= n_episode
+                        writer.add_scalar("charts/episodic_return", episode_return, global_step)
+                        writer.add_scalar("charts/episodic_length", episode_length, global_step)
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -433,9 +440,9 @@ if __name__ == "__main__":
                 returns = advantages + values
 
             # flatten the batch
-            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+            b_obs = obs.reshape((-1,) + envs.observation_space.shape)
             b_logprobs = logprobs.reshape(-1)
-            b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
+            b_actions = actions.reshape((-1,) + envs.action_space.shape)
             b_actions = b_actions.long()
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
@@ -565,7 +572,8 @@ if __name__ == "__main__":
     # save equations
     print("Saving equations...")
     print("ATTENTION: HARDCODED STUFF!!!")
-    var_names = envs.get_variable_names_hardcoded_pong()
+    from utils.hackatari_env import SyncVectorEnvWrapper
+    var_names = SyncVectorEnvWrapper.get_variable_names_hardcoded_pong()
     output_names = ["NOOP_1", "NOOP_2", "UP_1", "DOWN_1", "UP_2", "DOWN_2"]
     equations, _ = extract_equations(
         agent,

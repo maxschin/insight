@@ -1,15 +1,12 @@
 import os
+import sys
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(SRC)
+
 import argparse
 import gymnasium as gym
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    NoopResetEnv,
-)
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import CallbackList, EvalCallback, ProgressBarCallback, EveryNTimesteps
-from stable_baselines3.common.monitor import Monitor
 from stable_baselines3 import PPO
 from typing import Callable
 import torch
@@ -24,18 +21,12 @@ from tqdm import tqdm
 from rtpt import RTPT
 
 from agents.agent import load_agent
-from agents.imitation_learning import PrioritizedReplayBuffer, PrioritizedReplayBufferDataset, fill_replay_buffer, DeterministicReplayBuffer, collect_rollouts_eql, collect_training_targets_neural
-from hackatari_env import HackAtariWrapper, SyncVectorEnvWrapper
-from hackatari_utils import save_equations, get_reward_func_path
+from imitation_learning.utils import fill_replay_buffer, DeterministicReplayBuffer
+from utils.hackatari_env import HackAtariWrapper, SyncVectorEnvWrapper
+from utils.utils import save_equations, get_reward_func_path, make_env
 from agents.eql.regularization import L12Smooth
-from visualize_utils import visual_for_ocatari_agent_videos
-from callbacks import RtptCallback
-from evaluate_trained_agents import evaluate_agent
-
-# only for fine-tuning the distillation
-from agents.eql import functions
-from agents.eql.symbolic_network import SymbolicNet, SymbolicNetSimplified
-
+from utils.visualize_utils import visual_for_ocatari_agent_videos
+from utils.callbacks import RtptCallback
 
 def parse_args():
     # fmt: off
@@ -58,17 +49,9 @@ def parse_args():
                         default="", help="Custom reward function file name")
 
     # agent specific args
-    parser.add_argument("--agent_type", type=str, default="AgentSimplified", help="class name of the agent to be used")
+    parser.add_argument("--agent_type", type=str, default="Agent", help="class name of the agent to be used")
     return parser.parse_args()
 
-def make_env(env_name, seed, rewardfunc_path, modifs, index, is_eval=False, video_folder=None):
-    def thunk():
-        env = HackAtariWrapper(env_name, modifs=modifs, rewardfunc_path=rewardfunc_path)  
-        env = Monitor(env)
-        env.reset(seed=seed)
-        return env
-
-    return thunk
 
 def linear_schedule(initial_value: float) -> Callable[[float], float]:
     def func(progress_remaining: float) -> float:
@@ -85,9 +68,10 @@ if __name__ == "__main__":
             run_name += f"_{args.reward_function}"
         if args.modifs:
             run_name += f"_{''.join(args.modifs)}"
+        run_name += "_oc" # denotes object-centric agent
     else:
         run_name = args.run_name
-    args.n_funcs, args.n_layers, args.deter_action = 0,0, False # meaningless
+    args.n_funcs, args.n_layers, args.deter_action, args.threshold = 0,0, False, 0 # meaningless
 
     ########### DEFINE HYPERPARAMS ###########################
     # check if running inside container
@@ -125,6 +109,9 @@ if __name__ == "__main__":
     # rtpt
     rtpt_frequency = 10_000 if containerized else 10
 
+    torch.set_num_threads(n_cores)
+    torch.set_num_interop_threads(n_cores)
+
     ##########################################################
 
     # create rtpt for process tracking on remote server
@@ -132,9 +119,8 @@ if __name__ == "__main__":
     rtpt = RTPT(name_initials="MS", experiment_name="INSIGHT", max_iterations=max_iterations)
     rtpt.start()
 
-    # for storing and logging
-    # videos
-    base_folder = 'ppoeql_ocatari_videos'
+    # Setup directories for logging, videos, equations
+    base_folder = os.path.join(SRC, 'ppoeql_ocatari_videos')
     os.makedirs(base_folder, exist_ok=True)
     run_folder = os.path.join(base_folder, run_name)
     os.makedirs(run_folder, exist_ok=True)
@@ -143,21 +129,21 @@ if __name__ == "__main__":
     os.makedirs(test_folder, exist_ok=True)
     os.makedirs(record_folder, exist_ok=True)
     # equations
-    equations_folder = "equations"
+    equations_folder = os.path.join(SRC, "equations")
     os.makedirs(equations_folder, exist_ok=True)
     # model checkpoints
-    os.makedirs("models/agents", exist_ok=True)
-    ckpt_dir = os.path.abspath("models/agents")
+    os.makedirs(os.path.join(SRC, "models/agents"), exist_ok=True)
+    ckpt_dir = os.path.abspath(os.path.join(SRC, "models/agents"))
     # tensorboard logs
-    tensorboard_log_dir = f"runs/{run_name}"
+    tensorboard_log_dir = os.path.join(SRC, f"runs/{run_name}")
     os.makedirs(tensorboard_log_dir, exist_ok=True)
 
     ############### INITIAL TRAINING OF TEACHER ##############
 
     # Setup multiple HackAtari environments
     rewardfunc_path = get_reward_func_path(args.game, args.reward_function) if args.reward_function else None
-    env = SubprocVecEnv([make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, index=i) for i in range(args.num_envs)], start_method="fork")
-    env_eval = SubprocVecEnv([make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, index=i, is_eval=True, video_folder=record_folder) for i in range(args.num_envs // 2)], start_method="fork")
+    env = SubprocVecEnv([make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, sb3=True) for i in range(args.num_envs)], start_method="fork")
+    env_eval = SubprocVecEnv([make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path, sb3=True) for i in range(args.num_envs // 2)], start_method="fork")
 
     # load agent wrapped correctly for SB3 PPO training
     CustomAgent = load_agent(args.agent_type, for_sb3=True)
@@ -203,72 +189,33 @@ if __name__ == "__main__":
         device="cpu"
     )
 
-    ## train agent
-    #model.learn(
-    #    total_timesteps=training_timesteps,
-    #    callback=cb_list
-    #)
+    # train agent
+    model.learn(
+        total_timesteps=training_timesteps,
+        callback=cb_list
+    )
 
-    ## save agent
-    #print("Saving checkpoint...")
-    #ckpt_path = os.path.join(ckpt_dir, f"{run_name}_neural.pth")
-    #torch.save(model.policy.agent, ckpt_path)
+    # save agent
+    print("Saving checkpoint...")
+    ckpt_path = os.path.join(ckpt_dir, f"{run_name}_neural.pth")
+    torch.save(model.policy.agent, ckpt_path)
 
     ####### DISTILLATION PHASE ####################
     # distill agent by imitation learning
     # Here we perform imitation/distillation learning: we train eql_actor (student)
-    # to mimic the neural_actor (teacher) using a KL divergence loss.
+    # to mimic the neural_actor (teacher) using a cross-entropy divegence loss.
+
+    # instantiate device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     # collect samples for replay buffer
     print("Collecting samples for imitation learning...")
     buffer = DeterministicReplayBuffer(capacity=replay_capacity)
     device="cpu"
     agent_path = os.path.join(ckpt_dir, f"{run_name}_neural.pth")
-    agent = torch.load(agent_path, weights_only=False)
+    agent = model.policy.agent
     agent.to(device)
     fill_replay_buffer(env, agent, buffer, device, target_size=replay_capacity)
-
-    # instantiate device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device("cpu")
-    #agent = model.policy.agent
-    agent_path = os.path.join(ckpt_dir, f"{run_name}_neural.pth")
-    agent = torch.load(agent_path, weights_only=False)
-    n_funcs = 4
-    in_dim = agent.eql_actor.in_dim
-    activation_funcs = [
-        *[functions.Pow(2)] * 2 * n_funcs,
-        *[functions.Pow(3)] * 2 * n_funcs,
-        *[functions.Constant()] * 2 * n_funcs,
-        *[functions.Identity()] * 2 * n_funcs,
-        *[functions.Product()] * 2 * n_funcs,
-        *[functions.Add()] * 2 * n_funcs,]
-    agent.eql_actor = SymbolicNet(
-        1,
-        funcs=activation_funcs,
-        in_dim=in_dim,
-        out_dim=6
-    )
-    agent.activation_funcs = activation_funcs
-    agent.to(device)
-    torch.set_num_threads(n_cores)
-    torch.set_num_interop_threads(n_cores)
-
-    #variable_names = env.env_method("get_variable_names", indices=[0])[0]
-    #output_names = env.env_method("get_action_names", indices=[0])[0]
-    #equation_list = agent.eql_actor.pretty_print(variable_names, output_names)
-    #print(equation_list)
-    #breakpoint()
-    import agents.eql.pretty_print as pretty_print
-    from agents.agent import Agent
-    import sympy as sy
-    var_names = env.env_method("get_variable_names", indices=[0])[0]
-    output_names = env.env_method("get_action_names", indices=[0])[0]
-    with torch.no_grad():
-        expra = pretty_print.network(agent.eql_actor.get_weights(), agent.activation_funcs, var_names)
-        for i, a in enumerate(output_names):
-            print(f"action{a}:")
-            sy.pprint(sy.simplify(expra[i]))
-
 
 
     # Set teacher (neural_actor) to evaluation mode and student (eql_actor) to train mode.
@@ -282,14 +229,13 @@ if __name__ == "__main__":
     reg_weight_now = reg_weight
 
     # create a summary writer to track loss
-    # writer = SummaryWriter(log_dir=model.logger.dir)
-    writer = SummaryWriter(log_dir=tensorboard_log_dir)
+    writer = SummaryWriter(log_dir=model.logger.dir)
 
     # the data loader for loading from replay buffer
     dataloader = DataLoader(buffer, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
 
-    ## distill
-    #print("Starting distillation phase...")
+    # distill
+    print("Starting distillation phase...")
     progress_bar = tqdm(range(num_distillation_epochs), desc="Distillation phase", unit="epoch")
 
     batch_num = 0
@@ -332,18 +278,18 @@ if __name__ == "__main__":
         # eval eql agent on environments
         if epoch % distillation_eval_freq == 0 or epoch == 0:
             agent.eql_actor.eval()
-            mean_episode_reward = evaluate_agent(agent, env_eval, episodes=n_eval_episodes, actor="eql", device=device)
-            writer.add_scalar("Distillation/EQL_returns", mean_episode_reward, epoch)
+            action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor="eql")[0]
+            eql_returns, eql_lengths = eval_policy(
+                        env_eval, action_func, device=device)
+            writer.add_scalar("Distillation/EQL_returns", eql_returns, epoch)
+            writer.add_scalar("Distillation/EQL_lengths", eql_lengths, epoch)
 
         # Update regularization weight to increase linearly from zero to full weight over epochs.
         reg_weight_now = ((epoch / num_distillation_epochs) ** 2) * reg_weight
 
-    ## save equations
-    #print("Saving equations...")
-    #variable_names = env.env_method("get_variable_names", indices=[0])[0]
-    #output_names = env.env_method("get_action_names", indices=[0])[0]
-    #equation_list = agent.eql_actor.pretty_print(variable_names, output_names)
-    #save_equations(equation_list, equations_folder, run_name)
+    # save equations
+    print("Saving equations...")
+    # TODO
 
     # save agent
     print("Saving checkpoint...")

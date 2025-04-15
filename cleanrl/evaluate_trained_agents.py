@@ -1,22 +1,26 @@
+import os
+import sys
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(SRC)
+
 import re
 import argparse
-import os
-from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import SubprocVecEnv
 import torch
 import pandas as pd
-from utils.hackatari_env import SyncVectorEnvWrapper  # Ensure this is correctly imported
-from utils.hackatari_utils import get_reward_func_path
-from train_policy_atari import make_env, eval_policy
+from utils.utils import get_reward_func_path, eval_policy, make_env
 import copy
-from visualize_utils import visual_for_ocatari_agent_videos
+from utils.visualize_utils import visual_for_ocatari_agent_videos
 from distutils.util import strtobool
 from tqdm import tqdm
 from rtpt import RTPT
 
 MODIFS = {
-  "PongNoFrameskip-v4": ["default", "lazy_enemy", "hidden_enemy", "up_drift", "left_drift"],
-  "Freeway": [],
-  "Seaquest": []
+  "PongNoFrameskip-v4": ["default", "lazy_enemy"],
+  "SeaquestNoFrameskip-v4": ["default", "disable_enemies"],
+  "MsPacmanNoFrameskip-v4": ["default", "set_level_1","set_level_2","set_level_3"],
+  "SpaceInvadersNoFrameskip-v4": ["default", "shift_shields_three"],
+  "FreewayNoFrameskip-v4": ["default", "stop_all_cars"],
 }
 
 def parse_args():
@@ -24,21 +28,23 @@ def parse_args():
     parser.add_argument("--run_names", nargs="*", type=str, help="List of run names (filenames without extension).")
     parser.add_argument("--record_eql", type=lambda x: bool(strtobool(x)), default=True, help="Flag to record equality check logs.")
     parser.add_argument("--use_modifs", type=lambda x: bool(strtobool(x)), default=True, help="Flag to enable Hackatari modifications")
+    parser.add_argument("--use_e2e", type=lambda x: bool(strtobool(x)), default=True, help="Evalute end-to-end agents, otherwise object-enctric agents")
     parser.add_argument("--n_envs_eval", type=int, default=4, help="Number of parallel envs to use for evaluation")
     parser.add_argument("--n_eval_episodes", type=int, default=30, help="Number of episodes that returns should be collected on")
     parser.add_argument("--n_record_steps", type=int, default=1000, help="Number of steps that should be taken per recording in environment")
     parser.add_argument("--seed", type=int, default=21, help="The seed to use for the eval envs")
     return parser.parse_args()
 
-def load_checkpoints(run_names, device="cpu"):
+def load_checkpoints(run_names, device="cpu", use_e2e=True):
     checkpoint_list = []
     ckpt_dir = os.path.abspath("models/agents")
     
+    ending = f"_{"e2e" if use_e2e else "oc"}_final.pth"
     if run_names:
-        filenames = [f"{name}_final.pth" for name in run_names]
+        filenames = [f"{name}{ending}" for name in run_names]
     else:
-        filenames = [f for f in os.listdir(ckpt_dir) if f.endswith("_final.pth")]
-        run_names = [f.rsplit("_final.pth", 1)[0] for f in filenames if "_final.pth" in f]
+        filenames = [f for f in os.listdir(ckpt_dir) if f.endswith(ending)]
+        run_names = [f.rsplit(ending, 1)[0] for f in filenames if ending in f]
         print(run_names)
     
     for filename in filenames:
@@ -64,54 +70,6 @@ def load_checkpoints(run_names, device="cpu"):
     
     return checkpoint_list
 
-def evaluate_agent(agent, env, episodes=10, actor="neural", device="cpu"):
-    """
-    Evaluate an agent using a vectorized environment (SubprocVecEnv) over a total of `episodes` complete episodes.
-    Handles cases where individual sub-environments finish at different times.
-    
-    :param agent: The agent to evaluate. Must have a method `get_action_and_value` that accepts a batch of observations.
-    :param env: A vectorized environment (e.g., SubprocVecEnv) that returns batches of observations.
-    :param episodes: Total number of episodes to average over.
-    :param actor: Which actor network to use when getting actions.
-    :return: Average episode reward.
-    """
-    if not isinstance(device, torch.device):
-        device = "cpu"
-    total_rewards = []  # Stores completed episode rewards
-    # Reset all sub-environments
-    obs = env.reset()
-    if isinstance(obs, tuple):
-        obs = obs[0]
-    # Convert observations to torch tensor
-    obs = torch.tensor(obs, dtype=torch.float32, device=device)
-    # Initialize a reward accumulator for each sub-environment
-    num_envs = obs.shape[0]
-    ep_rewards = [0.0] * num_envs
-
-    while len(total_rewards) < episodes:
-        # Get actions for the batch of observations from the specified actor
-        action, _, _, _, _, _ = agent.get_action_and_value(obs, actor=actor)
-        # Convert actions to numpy as required by the vectorized env
-        action_np = action.cpu().numpy()
-        # Step the vectorized environment. These will be arrays/lists with length num_envs.
-        next_obs, rewards, dones, infos = env.step(action_np)
-        # If next_obs is a tuple, extract the observations.
-        if isinstance(next_obs, tuple):
-            next_obs = next_obs[0]
-        # Loop through each sub-environment's results
-        for i, done in enumerate(dones):
-            ep_rewards[i] += rewards[i]
-            if done:
-                total_rewards.append(ep_rewards[i])
-                ep_rewards[i] = 0.0  # Reset the accumulator for that environment
-
-        # Prepare for next iteration: convert observations to torch tensor.
-        obs = torch.tensor(next_obs, dtype=torch.float32, device=device)
-
-    # Compute the average reward over the collected episodes
-    avg_reward = sum(total_rewards[:episodes]) / episodes
-    return avg_reward
-
 def main():
     args = parse_args()
 
@@ -134,6 +92,7 @@ def main():
     args.threshold = 0.5
     args.gray = True
     
+    # collect data
     final_datapoints = []
     
     # iterate over all final checkpoints of agents to evaluate
@@ -162,8 +121,7 @@ def main():
                 modif_list = [modif] if modif != "default" else []
 
                 # set up envs for evaluation and recording
-                envs = SyncVectorEnvWrapper(
-                    [make_env(args.game, args.seed + i, args, rewardfunc_path, modifs=modif_list) for i in range(args.n_envs_eval)])
+                envs = SubprocVecEnv([make_env(args.game, args.seed + i, modifs=modif_list, rewardfunc_path=rewardfunc_path, pix=True) for i in range(args.n_envs_eval)], start_method="fork")
 
                 # always record statistics for both types of agents
                 for agent_type in ["neural", "eql"]:

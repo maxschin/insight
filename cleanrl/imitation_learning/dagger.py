@@ -1,17 +1,19 @@
 import os
+import sys
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(SRC)
+
 import torch
 from torch.optim import optimizer
 from torch.utils.tensorboard import SummaryWriter
-from agents.imitation_learning import collect_rollouts_eql, collect_training_targets_neural, DeterministicReplayBuffer
+from imitation_learning.utils import collect_rollouts_eql, collect_training_targets_neural, DeterministicReplayBuffer
+from utils.utils import eval_policy, make_env
 from typing import Callable
 from agents.eql.regularization import L12Smooth
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from torch import optim
-from evaluate_trained_agents import evaluate_agent
 from tqdm import tqdm
-from hackatari_env import HackAtariWrapper
-from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 regularization = L12Smooth()
@@ -155,24 +157,18 @@ def quadratic_schedule(initial_value: float) -> Callable[[float], float]:
         return (progress_remaining ** 2) * initial_value
     return func
 
-def make_env(env_name, seed=42):
-    def thunk():
-        env = HackAtariWrapper(env_name)  
-        env = Monitor(env)
-        env.reset(seed=seed)
-        return env
-    return thunk
-
 if __name__ == "__main__":
     print("Running DAGGER distillation")
+    game = "PongNoFrameskip-v4"
 
     # set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # load agent
-    ckpt_dir = os.path.abspath("models/agents")
-    run_name = "Pong_AgentSimplified"
-    agent_path = os.path.join(ckpt_dir, f"{run_name}_neural.pth")
+    os.makedirs(os.path.join(SRC, "models/agents"), exist_ok=True)
+    ckpt_dir = os.path.abspath(os.path.join(SRC, "models/agents"))
+    run_name = "PongNoFrameskip-v4_Agent"
+    agent_path = os.path.join(ckpt_dir, f"{run_name}_oc_final.pth")
     agent = torch.load(agent_path, weights_only=False)
     agent.to(device)
 
@@ -180,12 +176,12 @@ if __name__ == "__main__":
     n_cores = len(os.sched_getaffinity(0))
     torch.set_num_threads(n_cores)
     torch.set_num_interop_threads(n_cores)
-    game = "Pong"
-    env = SubprocVecEnv([make_env(game, seed=i) for i in range(n_cores)], start_method="fork")
+    env = SubprocVecEnv(
+        [make_env(game, 42 + i, modifs=[], rewardfunc_path=None, sb3=False) for i in range(n_cores)], start_method="fork")
 
     # prepare logging
     run_name = run_name + "_Dagger"
-    tensorboard_log_dir = f"runs/{run_name}"
+    tensorboard_log_dir = os.path.join(SRC, f"runs/{run_name}")
     os.makedirs(tensorboard_log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
@@ -211,7 +207,9 @@ if __name__ == "__main__":
     optimizer = optim.Adam(agent.eql_actor.parameters(), learning_rate)
 
     # just to be sure eval neural agent as baseline
-    neural_returns = evaluate_agent(agent, env, episodes=10, actor="neural", device=device)
+    action_func = lambda t: agent.get_action_and_value(t, threshold=, actor="neural")[0]
+    neural_returns, _ = eval_policy(
+        env, action_func, device=device)
     print(f"NEURAL RETURNS: {neural_returns}")
 
     # the learning
