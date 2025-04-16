@@ -10,11 +10,11 @@ games=("SeaquestNoFrameskip-v4" "SpaceInvadersNoFrameskip-v4")
 echo "=== Starting batch processing for all games ==="
 
 # generating datasets
-echo "--- Generating datasets ---"
-for game in "${games[@]}"; do
-    echo "Generating dataset for $game..."
-    python cnn/generate_dataset.py --game="$game"
-done
+# echo "--- Generating datasets ---"
+# for game in "${games[@]}"; do
+#     echo "Generating dataset for $game..."
+#     python cnn/generate_dataset.py --game="$game"
+# done
 
 # segmenting videos
 echo "--- Segmenting videos ---"
