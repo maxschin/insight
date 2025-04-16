@@ -1,0 +1,5 @@
+Unter diesem link können Beispiel Datensätze mit Video und zugehörigen Labels für verschiedene Spiele gefunden werden. 
+
+https://hessenbox.tu-darmstadt.de/getlink/fiNBqMsY7zAtqDdGZCQdyGSo/batch_training
+
+Den inhalt in den batch_training folder und dann mit scripts/pre_train_cnn_all.sh für jeden Datensatz ein CNN trainieren.

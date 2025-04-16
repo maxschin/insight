@@ -7,11 +7,13 @@ import matplotlib.image
 import matplotlib.pyplot as plt
 import cv2
 
+from distutils.util import strtobool
+
 from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_process", type=bool, default=True)
+    parser.add_argument("--batch_process", type=strtobool, default=True)
     parser.add_argument("--game", type=str, default="Freeway")
     parser.add_argument("--test_frames_folder", type=str, default="test_frames/")
     parser.add_argument("--train_frames_folder", type=str, default="train_frames/")

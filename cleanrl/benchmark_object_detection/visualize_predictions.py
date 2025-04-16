@@ -10,9 +10,12 @@ from time import sleep
 
 from PIL import Image
 
+from distutils.util import strtobool
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_process", type=bool, default=True)
+    parser.add_argument("--batch_process", type=strtobool, default=True)
 
     parser.add_argument("--game", type=str, default="Freeway")
 
@@ -30,16 +33,16 @@ def parse_args():
     parser.add_argument("--file2", type=str, default=None,
         help="file path to the second json file with the results to be visualized, if it is none it will be ignored")
 
-    parser.add_argument("--video", type=bool, default=False,
+    parser.add_argument("--video", type=strtobool, default=False,
         help="if it is true the output will be a video")
 
-    parser.add_argument("--all_images", type=bool, default=False,
+    parser.add_argument("--all_images", type=strtobool, default=False,
         help="if it is ture all frames will be safed")
     
     parser.add_argument("--resolution", type=int, default=84,
         help="the resolution of the image")
     
-    parser.add_argument("--save", type=bool, default=False)
+    parser.add_argument("--save", type=strtobool, default=False)
 
     parser.add_argument("--output_path", type=str, default="images",
         help="the folder in which all the output is stores")

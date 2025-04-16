@@ -29,7 +29,6 @@ from distutils.util import strtobool
 from collections import defaultdict
 import warnings
 
-from distutils.util import strtobool
 
 def parse_args():
     # fmt: off

@@ -5,13 +5,14 @@ import os
 import json
 import numpy as np
 import torch
+from distutils.util import strtobool
 
 OBJECT_ORDER = []
 
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--batch_process", type=bool, default=True)
+    parser.add_argument("--batch_process", type=strtobool, default=True)
 
     parser.add_argument("--game", type=str, default="Freeway")
 
