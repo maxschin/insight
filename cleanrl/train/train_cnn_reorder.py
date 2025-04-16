@@ -80,16 +80,14 @@ def parse_args():
 
 
     parser.add_argument("--game", type=str, default="Freeway")
-
-    path_to_cleanrl = os.path.join(os.path.dirname(__file__))
     
-    parser.add_argument("--train_path", type=str, default=path_to_cleanrl + "/batch_training/Freeway/train_frames")
+    parser.add_argument("--train_path", type=str, default=os.path.join(SRC, "batch_training", "Freeway", "train_frames"))
     parser.add_argument("--train_labels", type=str, default="labels_ocatari.json")
 
-    parser.add_argument("--test_path", type=str, default=path_to_cleanrl + "/batch_training/Freeway/test_frames")
+    parser.add_argument("--test_path", type=str, default=os.path.join(SRC, "batch_training", "Freeway", "test_frames"))
     parser.add_argument("--test_labels", type=str, default="labels_ocatari.json")
 
-    parser.add_argument("--model_path", type=str, default=path_to_cleanrl + "/batch_training/Freeway/cnn.pkl")
+    parser.add_argument("--model_path", type=str, default=os.path.join(SRC, "batch_training","Freeway","cnn.pkl"))
     
     parser.add_argument("--coordinate_loss", type=str, default="l1")
     parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -308,10 +306,9 @@ if __name__ == '__main__':
     args = parse_args()
 
     if args.batch_process:
-        path_to_cleanrl = os.path.join(os.path.dirname(__file__))
-        args.test_path = path_to_cleanrl + "/batch_training/" + args.game + "/test_frames"
-        args.train_path = path_to_cleanrl + "/batch_training/" + args.game + "/train_frames"
-        args.model_path = path_to_cleanrl + "/batch_training/" + args.game +"/cnn.pkl"
+        args.test_path = os.path.join(SRC, "batch_training",args.game, "test_frames")
+        args.train_path = os.path.join(SRC , "batch_training" , args.game , "train_frames")
+        args.model_path = os.path.join(SRC , "batch_training" , args.game ,"cnn.pkl")
 
     best_acc = 9999
     best_avg_precision = 0
