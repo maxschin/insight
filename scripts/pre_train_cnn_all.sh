@@ -5,7 +5,6 @@ cd cleanrl
 
 # define list of games for which pretraining should occur
 games=("PongNoFrameskip-v4" "SeaquestNoFrameskip-v4" "MsPacmanNoFrameskip-v4" "SpaceInvadersNoFrameskip-v4" "FreewayNoFrameskip-v4")
-games=("SeaquestNoFrameskip-v4" "SpaceInvadersNoFrameskip-v4")
 
 echo "=== Starting batch processing for all games ==="
 
