@@ -63,11 +63,3 @@ class SyncVectorEnvWrapper(SyncVectorEnv):
 
         return variable_names
 
-
-if __name__ == "__main__":
-    env = HackAtariWrapper("Pong")
-    breakpoint()
-    check_env(env)
-
-
-

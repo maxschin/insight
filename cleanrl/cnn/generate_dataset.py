@@ -21,7 +21,7 @@ target_dir = os.path.join(SRC, "batch_training/" + args.game)
 if not os.path.isdir(target_dir):
     os.mkdir(target_dir)
 
-env = OCAtari(args.game, mode="ram", hud=True, render_mode="rgb_array")
+env = OCAtari(args.game, mode="both", hud=True, render_mode="rgb_array")
 env.metadata['render_fps'] = 30
 observation, info = env.reset()
 
@@ -44,7 +44,7 @@ for i in tqdm(range(args.frames)):
 
     # dataset["OBS"].append(obs.flatten().tolist())
     dataset["VIS"].append(
-        [x for x in sorted(env.objects, key=lambda o: str(o))])
+        [x for x in sorted(env.objects_v, key=lambda o: str(o))])
     dataset["RAM"].append(
         [x for x in sorted(env.objects, key=lambda o: str(o)) if x.hud == False])
     dataset["HUD"].append(

@@ -52,7 +52,7 @@ def wrap_for_sb3(agent_class):
             # Create an instance of your Agent.
             n_actions = action_space.n
             agent_in_dim = observation_space.shape[0] * observation_space.shape[1] # buffer win size * neuro-sympbolic out_dims
-            self.agent = agent_class(args, n_actions=n_actions, agent_in_dim=agent_in_dim)
+            self.agent = agent_class(args, n_actions=n_actions, agent_in_dim=agent_in_dim, skip_perception=True)
 
             # manually add agent to optimizer
             self.add_module("agent", self.agent)
@@ -127,7 +127,7 @@ class Agent(nn.Module):
             nn.Linear(512, 1))
         if not skip_perception and args.load_cnn:
             print('load cnn')
-            model_path = os.path.join(SRC,'models/CNN/'+f'{args.game}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl') 
+            model_path = os.path.join(SRC, "batch_training", args.game, 'cnn.pkl') 
             self.network = torch.load(model_path, map_location=device)
             print(f"CNN loaded to: {next(self.network.parameters()).device}")
         self.deter_action = args.deter_action

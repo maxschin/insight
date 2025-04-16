@@ -2,6 +2,7 @@
 docs/
 metadrive/
 wandb/
+.venv/
 
 cleanrl/eval/
 cleanrl/models/CNN/

@@ -1,4 +1,3 @@
-# Uses the (mainly) original implementation of the INSIGHT authors with end-to-end training with distillation
 # Use Ubuntu 24.04 as the base image
 FROM ubuntu:24.04
 
@@ -21,8 +20,8 @@ COPY . .
 # Set working directory
 WORKDIR .
 
-# Set working directory to cleanrl
-WORKDIR /cleanrl
+# Ensure the bash script located at /scripts/do_it.sh is executable
+RUN chmod +x /scripts/pre_train_cnn_all.sh
 
-# Run the Python script
-CMD ["python", "train_policy_atari.py"]
+# Run the bash script located at /scripts/do_it.sh
+CMD ["/bin/bash", "/scripts/pre_train_cnn_all.sh"]

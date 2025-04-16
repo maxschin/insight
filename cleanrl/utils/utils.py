@@ -1,4 +1,6 @@
 import os
+
+from torch.autograd import variable
 from utils.hackatari_env import HackAtariWrapper
 from stable_baselines3.common.atari_wrappers import (  # isort:skip
     ClipRewardEnv,
@@ -11,6 +13,9 @@ from stable_baselines3.common.monitor import Monitor
 import gymnasium as gym
 import torch
 import numpy as np
+import json
+
+SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 def save_equations(expression_list, output_folder, run_name):
     """
@@ -55,7 +60,7 @@ def get_reward_func_path(game, reward_func_name):
         ValueError: If the game or reward_func_name contains invalid characters.
         FileNotFoundError: If the game directory or reward function file does not exist.
     """
-    base_dir = "reward_functions"
+    base_dir = os.path.join(SRC, "reward_functions")
     
     # Validate that game and reward_func_name don't contain path separators
     for part, name in [(game, "game"), (reward_func_name, "reward_func_name")]:
@@ -128,3 +133,38 @@ def eval_policy(envs, action_func, device="cuda", n_episode=10):
     avg_length = total_length / total_episodes
 
     return avg_return, avg_length
+
+def get_object_order(game):
+    folder = os.path.join(SRC, "batch_training" + game)
+    file = os.path.join(folder, "object_order.json")
+    with open(file, 'r') as f:
+        data = json.load(f)
+    obj_order_raw = data["object_order"]
+    num_obj_per_type = data["number_of_objects_per_type"]
+
+    # construct obj names from obj order and num_obj_per_type
+    objs_order = []
+    for obj in obj_order_raw:
+        for i in range(num_obj_per_type):
+            if i == 0:
+                objs_order.append(obj)
+            else:
+                objs_order.append(f"{obj}{str(i)}")
+
+    # build variable names
+    num_frames = 4
+    num_objs = 256
+    variable_names = []
+    coords_order = ["y", "x"]
+    for i in range(num_frames):
+        frame = i+1
+        for j in range(num_objs):
+            for coord in coords_order:
+                obj = f"obj{j+1}" if j>=len(objs_order) else objs_order[j]
+                variable_name = f"{obj}_{coord}_{frame}"
+                variable_names.append(variable_name)
+
+    return variable_names
+
+
+

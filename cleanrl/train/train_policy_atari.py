@@ -30,7 +30,7 @@ import torch.nn.functional as F
 import copy
 from utils.visualize_utils import visual_for_ocatari_agent_videos, visual_for_agent_videos
 from utils.hackatari_env import SyncVectorEnvWrapper, HackAtariWrapper
-from utils.utils import get_reward_func_path, save_equations, make_env, eval_policy
+from utils.utils import get_reward_func_path, save_equations, make_env, eval_policy, get_object_order
 from tqdm import tqdm
 import itertools
 import sympy as sy
@@ -169,8 +169,11 @@ def parse_args():
         help="drop reg weight or not")   
 
     # eql equation-specific arguments
-    parser.add_argument("--equation_accuracy", type=float, default=0.01, help="The decimal point accuracy the coefficients of the eql equations should be rounded to before printing")
-    parser.add_argument("--equation_threshold", type=float, default=0.05, help="Coeffecients below threshold will be filtered from eql equations before printing")
+    parser.add_argument("--equation_accuracy", type=float, default=0.001, help="The decimal point accuracy the coefficients of the eql equations should be rounded to before printing")
+    parser.add_argument("--equation_threshold", type=float, default=0.01, help="Coeffecients below threshold will be filtered from eql equations before printing")
+
+    # for debugging
+    parser.add_argument("--local_debugging", action="store_true", help="Radically shortens the training loop when running outside of container")
 
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
@@ -200,7 +203,8 @@ if __name__ == "__main__":
     if containerized:
         print("Running inside container")
     else:
-        args.total_timesteps = args.batch_size
+        if args.local_debugging:
+            args.total_timesteps = args.batch_size
         print("Running locally")
 
     ##sam_track_data:
@@ -208,10 +212,10 @@ if __name__ == "__main__":
     import warnings
     warnings.warn("Location is hardcoded, needs to be updated for other games than Pong!")
 
-    asset_dir = os.path.join(SRC, "sam_track/assets/Pong_input")
-    images_dir = os.path.join(asset_dir, 'Pong_input_masks_train')
+    asset_dir = os.path.join(SRC, "batch_training", args.game)
+    images_dir = os.path.join(asset_dir, "train_frames")
     labels = os.path.join(images_dir, 'labels_ocatari.json')
-    images_dir_test = os.path.join(asset_dir, "Pong_input_masks_test")
+    images_dir_test = os.path.join(asset_dir, "test_frames")
     labels_test = os.path.join(images_dir_test, 'labels_ocatari.json')
 
     train_dataset = CustomImageDataset(images_dir,labels,args,train_flag=True)
@@ -571,10 +575,9 @@ if __name__ == "__main__":
 
     # save equations
     print("Saving equations...")
-    print("ATTENTION: HARDCODED STUFF!!!")
-    from utils.hackatari_env import SyncVectorEnvWrapper
-    var_names = SyncVectorEnvWrapper.get_variable_names_hardcoded_pong()
-    output_names = ["NOOP_1", "NOOP_2", "UP_1", "DOWN_1", "UP_2", "DOWN_2"]
+    var_names = get_object_order(args.game)
+    output_names = envs.env_method("get_action_names", indices=[0])[0]
+    output_names = envs
     equations, _ = extract_equations(
         agent,
         var_names,

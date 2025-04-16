@@ -1,31 +1,55 @@
 #!/bin/bash
-# Change to the cleanrl directory
-cd cleanrl
+# Change to the cleanrl/train directory
+cd cleanrl/train
 
-# Define an ordered array of games
-games=("PongNoFrameskip-v4" )
+# List of games (exactly as specified)
+games=("PongNoFrameskip-v4" "SeaquestNoFrameskip-v4" "MsPacmanNoFrameskip-v4" "SpaceInvadersNoFrameskip-v4" "FreewayNoFrameskip-v4")
 
-# Define an associative array where each key is a game and the value is a space-separated list of reward functions.
-declare -A reward_funcs
-reward_funcs["Pong"]="default basic_rf close_but_no_hit_rf opposite_of_enemy_rf random_rf"
-#reward_funcs["Pong"]="default"
-reward_funcs["Freeway"]="default basic_rf stay_in_middle_rf random_rf"
-reward_funcs["Seaquest"]="default basic_rf stick_to_surface_rf random_rf"
+# Reward configurations for Pong with custom reward functions.
+declare -A reward_configs_Pong=(
+    ["default"]=10000000
+    ["close_but_no_hit_rf"]=10000000
+    ["opposite_of_enemy_rf"]=10000000
+    ["random_rf"]=10000000
+    ["up_and_down_rf"]=10000000
+)
 
-# Iterate over each game
+# Default reward configuration for all other games.
+declare -A reward_configs_default=(
+    ["default"]=10000000
+)
+
+# Map each game to its corresponding reward configuration associative array.
+declare -A reward_config_names=(
+    ["PongNoFrameskip-v4"]="reward_configs_default" # change to reward_configs_Pong if you want to train Pong with different reward functions
+    ["SeaquestNoFrameskip-v4"]="reward_configs_default"
+    ["MsPacmanNoFrameskip-v4"]="reward_configs_default"
+    ["SpaceInvadersNoFrameskip-v4"]="reward_configs_default"
+    ["FreewayNoFrameskip-v4"]="reward_configs_default"
+)
+
+# Iterate over every game.
 for game in "${games[@]}"; do
-  # Get the reward functions for this game
-  rewards=${reward_funcs[$game]}
-  
-  # Iterate over each reward function for this game
-  for reward in $rewards; do
-    # Handle empty reward function by setting it to an empty argument
-    if [ "$reward" == "default" ]; then
-      echo "Running experiment for game: $game with no reward function"
-      python train_then_distill_policy_hackatari.py --game="$game"
-    else
-      echo "Running experiment for game: $game with reward function: $reward"
-      python train_then_distill_policy_hackatari.py --game="$game" --reward_function="$reward"
-    fi
-  done
+    echo "=== Processing game: $game ==="
+    
+    # Determine the reward configuration for the current game.
+    config_array_name=${reward_config_names[$game]}
+    # Create a nameref to the appropriate associative array (Bash 4.3+ required)
+    declare -n config="$config_array_name"
+    
+    # Iterate over each reward function defined in the associative array.
+    for reward in "${!config[@]}"; do
+        timesteps=${config[$reward]}
+        # Determine the reward parameter to pass:
+        if [ "$reward" == "default" ]; then
+            echo "Training $game using default reward function with timesteps: $timesteps"
+            python train_policy_ocatari.py --game="$game" --total-timesteps "$timesteps"
+        else
+            echo "Training $game using custom reward function '$reward' with timesteps: $timesteps"
+            python train_policy_ocatari.py --game="$game" --total-timesteps "$timesteps" --reward_function="$reward"
+        fi
+    done
+    echo ""  # Newline for clarity between games.
 done
+
+echo "All game and reward function combinations processed."

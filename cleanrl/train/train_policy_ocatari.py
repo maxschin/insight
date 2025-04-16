@@ -114,6 +114,10 @@ def parse_args():
     # eql equation-specific arguments
     parser.add_argument("--equation_accuracy", type=float, default=0.001, help="The decimal point accuracy the coefficients of the eql equations should be rounded to before printing")
     parser.add_argument("--equation_threshold", type=float, default=0.01, help="Coeffecients below threshold will be filtered from eql equations before printing")
+
+    # for debugging
+    parser.add_argument("--local_debugging", action="store_true", help="Radically shortens the training loop when running outside of container")
+
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -128,13 +132,13 @@ if __name__ == "__main__":
     if containerized:
         print("Running inside container")
     else:
-        # adjust args accordingly
-        args.num_envs = 8
-        args.batch_size = int(args.num_envs * args.num_steps)
-        args.minibatch_size = int(args.batch_size // args.num_minibatches)
-        args.total_timesteps = args.batch_size
-        args.use_all_cores = False
         print("Running locally")
+        if args.local_debugging:
+            args.num_envs = 8
+            args.batch_size = int(args.num_envs * args.num_steps)
+            args.minibatch_size = int(args.batch_size // args.num_minibatches)
+            args.total_timesteps = args.batch_size
+            args.use_all_cores = False
 
     # adjust batch size if number of cores == number of envs
     if args.use_all_cores:

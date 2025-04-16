@@ -5,7 +5,6 @@ sys.path.append(SRC)
 
 from agents.Normal_Cnn import OD_frames_gray, OD_frames, OD_frames_gray2
 import numpy as np
-import os
 import torch
 from torch.nn import MSELoss
 from torch.optim import SGD,Adam

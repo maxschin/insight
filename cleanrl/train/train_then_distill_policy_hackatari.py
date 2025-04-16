@@ -23,8 +23,9 @@ from rtpt import RTPT
 from agents.agent import load_agent
 from imitation_learning.utils import fill_replay_buffer, DeterministicReplayBuffer
 from utils.hackatari_env import HackAtariWrapper, SyncVectorEnvWrapper
-from utils.utils import save_equations, get_reward_func_path, make_env
+from utils.utils import save_equations, get_reward_func_path, make_env, eval_policy
 from agents.eql.regularization import L12Smooth
+from agents.eql.pretty_print import extract_equations
 from utils.visualize_utils import visual_for_ocatari_agent_videos
 from utils.callbacks import RtptCallback
 
@@ -50,6 +51,9 @@ def parse_args():
 
     # agent specific args
     parser.add_argument("--agent_type", type=str, default="Agent", help="class name of the agent to be used")
+
+    # for debugging
+    parser.add_argument("--local_debugging", action="store_true", help="Radically shortens the training loop when running outside of container")
     return parser.parse_args()
 
 
@@ -71,7 +75,7 @@ if __name__ == "__main__":
         run_name += "_oc" # denotes object-centric agent
     else:
         run_name = args.run_name
-    args.n_funcs, args.n_layers, args.deter_action, args.threshold = 0,0, False, 0 # meaningless
+    args.n_funcs, args.n_layers, args.deter_action, args.threshold = 0,1, False, 0 # meaningless, but don't change ;)
 
     ########### DEFINE HYPERPARAMS ###########################
     # check if running inside container
@@ -81,10 +85,12 @@ if __name__ == "__main__":
     else:
         print("Running locally")
 
+    debugging = not containerized and args.local_debugging
+
     # parameters for training
     adam_step_size = 0.00025
     clipping_eps = 0.1
-    training_timesteps = 25_000_000 if containerized else 100
+    training_timesteps = 25_000_000 if not debugging else 100
     verbose=0
 
     # for evaluation
@@ -92,22 +98,22 @@ if __name__ == "__main__":
     args.num_envs = n_cores
     print(f"Running on: {n_cores} cores")
     n_eval_episodes = args.num_envs // 2 
-    eval_frequency = 500_000 if containerized else 50
+    eval_frequency = 500_000 if not debugging else 50
 
     # params for distillation
-    replay_capacity = 1_000_000 if containerized else 50
+    replay_capacity = 1_000_000 if not debugging else 50
     replay_priority_weight = 0.6
     reg_weight = 1e-3 / 2
-    num_distillation_epochs = 150 if containerized else 3
+    num_distillation_epochs = 150 if not debugging else 3
     distillation_eval_freq = 20
     batch_size = 1_024
     n_eval_episodes_eql_distillation = 100
 
     # for recording videos
-    recording_timesteps = 1_000 if containerized else 10
+    recording_timesteps = 1_000 if not debugging else 10
 
     # rtpt
-    rtpt_frequency = 10_000 if containerized else 10
+    rtpt_frequency = 10_000 if not debugging else 10
 
     torch.set_num_threads(n_cores)
     torch.set_num_interop_threads(n_cores)
@@ -289,7 +295,16 @@ if __name__ == "__main__":
 
     # save equations
     print("Saving equations...")
-    # TODO
+    var_names = env.env_method("get_variable_names", indices=[0])[0]
+    output_names = env.env_method("get_action_names", indices=[0])[0]
+    equations, _ = extract_equations(
+        agent,
+        var_names,
+        output_names,
+        accuracy=0.001,
+        threshold=0.01
+    )
+    save_equations(equations, equations_folder, run_name)
 
     # save agent
     print("Saving checkpoint...")
