@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Default Dockerfile
-DOCKERFILE="Dockerfile.eval"
+DOCKERFILE="docker/Dockerfile.eval"
 
 # Set the image name
 IMAGE_NAME="insight_eval"
@@ -28,15 +28,6 @@ else
     GPU_FLAG=""
 fi
 
-# Detached flag
-if $DETACHED; then
-    DETACHED_FLAG="-d"
-    echo "Running container in detached mode."
-else
-    DETACHED_FLAG=""
-    echo "Running container in foreground mode."
-fi
-
 # Increase shared memory allocation
 SHM_SIZE="--shm-size=8G"
 
@@ -47,7 +38,7 @@ podman build -t "$IMAGE_NAME" -f "$DOCKERFILE" .
 
 # Run the container with bind mounts
 echo "🔄 Running the container with mounted directories..."
-podman run --rm $DETACHED_FLAG $GPU_FLAG $SHM_SIZE \
+podman run --rm $GPU_FLAG $SHM_SIZE \
     $(for DIR in "${MOUNT_DIRS[@]}"; do echo "-v $(pwd)/$DIR:/$DIR "; done) \
     "$IMAGE_NAME"
 
