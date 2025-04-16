@@ -1,144 +1,87 @@
 
-<div align="center">
+# Not so INSIGHTful?
 
-# End-to-End Neuro-Symbolic Reinforcement Learning with Textual Explanations
-
-### ICML 2024 (Spotlight)
-
-**[Lirui Luo](https://liruiluo.github.io/), [Guoxi Zhang](https://guoxizhang.com/), [Hongming Xu](https://sbx126.github.io/), [Yaodong Yang](https://www.yangyaodong.com/), [Cong Fang](https://congfang-ml.github.io/), [Qing li](https://liqing-ustc.github.io/)**
-
-
-| [```Website```](https://ins-rl.github.io/) | [```Arxiv```](https://arxiv.org/abs/2403.12451) |
-:------------------------------------------------------:|:-----------------------------------------------:|
-
-<img src="docs/figures/teaser-1.png" width="568">
-
-</div>
-
----
-
-# Abstract
-
-Neuro-symbolic reinforcement learning (NS-RL) has emerged as a promising paradigm for explainable decision-making, characterized by the interpretability of symbolic policies.
-NS-RL entails structured state representations for tasks with visual observations, but previous methods are unable to refine the structured states with rewards due to a lack of efficiency.
-Accessibility also remains to be an issue, as extensive domain knowledge is required to interpret symbolic policies.
-In this paper, we present a framework for learning structured states and symbolic policies jointly, whose key idea is to distill vision foundation models into a scalable perception module and refines it during policy learning.
-Moreover, we design a pipeline to generate language explanations for policies and decisions using large language models.
-In experiments on nine Atari tasks, we verify the efficacy of our approach, and we also present explanations for policies and decisions.
-
-<div align="center">
-<table>
-<tr>
-<td>
-<img src="docs/figures/ICML-Framework-1.png" >
-</td>
-</tr>
-<tr>
-<th>
-The INSIGHT framework.
-</th>
-</tr>
-</table>
-</div>
-
-# Results
-
-
-Here is the segmentation videos before and after policy learing on Freeway:
-
-<div align="center">
-<table>
-<tr>
-<td>
-<img src="docs/gifs/Freeway_before264.gif" controls>
-</img>
-
-</td>
-</tr>
-<tr>
-<th>
-The video before.
-</th>
-</tr>
-</table>
-</div>
-
-<div align="center">
-<table>
-<tr>
-<td>
-<img src="docs/gifs/Freeway264.gif" controls>
-</img>
-</td>
-</tr>
-<tr>
-<th>
-The video after.
-</th>
-</tr>
-</table>
-</div>
-
----
-
-# Usage
+This repository builds on and is a fork of the [repository](https://github.com/ins-rl/insight) for the [INSIGHT](https://arxiv.org/abs/2403.12451) end-to-end explainable reinforcement learning framework. Using [OC_Atari](https://github.com/k4ntz/OC_Atari) and [HackAtari](https://github.com/k4ntz/HackAtari), we evaluated both the perceptual capabilities and the suitability of the INSIGHT framework for LLM-based explanations.
 
 ## Installation
-
+We assume that you have a working installation of ```python3``` on your system. The code is tested for version 3.12 on Ubuntu 22.04 to be changed at your own peril. If you want to avoid the installation but have ```podman``` installed, you can run the most important scripts directly inside containers. See below.
 ```bash
-# core dependencies
-conda env create -f environment.yml
-conda activate insight
-bash ./scripts/install.sh
-# download
-bash ./scripts/download_ckpt.sh
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -r requirements.txt
+pip install opencv-python-headless
 ```
-
-## Train INSIGHT
-
-To generate dataset, use
+If you want to run the object detection with SAM-Track as the authors did in the original paper, you might also have to install the following dependencies:
 ```bash
-bash scripts/dataset_generate.sh
+# TODO ALEX
 ```
-To train cnn, use
+## General usage
+You can run the core script to pre-train the CNN, train the end-to-end INSIGHT agents, and then evaluate them with different HackAtari modifications either locally or inside a container. As of now, this runs the script for Pong, SpaceInvaders, MsPacman, Seaquest, and Freeway. The selection of games can be configured inside```scripts/pre_train_cnn_all.sh``` and ```scripts/train_all_hackatari_original.sh```.
+
+### Run core script locally
 ```bash
-bash scripts/train_cnn.sh
+bash scripts/pre_train_cnn_all.sh
+bash scripts/train_all_hackatari_original.sh
+python cleanrl/evaluate_trained_agents.py
 ```
-Or you can use a build-in [dataset](https://drive.google.com/file/d/1E_b3eBJ47ze1OJ7Nz1khsJ-q1YrcjTdu/view?usp=sharing) directly
-
-To train policy, use 
+### Run core script in container (recommended)
+This assumes that you have ```podman``` set up on your system. The relevant directories will be mounted such that results are saved locally.
 ```bash
-bash scripts/train_policy_atari.sh
+bash scripts/docker_pre_train.sh
+bash scripts/docker_run.sh --original --all
+bash scripts/docker_eval.sh
 ```
+A few notes on the flags of the ```scripts/docker_run.sh``` file:
+- ```--all```: if this flag set, it runs the training for all games and their respective reward functions and training durations. If it is omitted, it runs the training only for Pong.
+- ```--original```: this flags specifies if an end-to-end, pixel-to-action INSIGHT agent is trained as in the original paper or (if not set) an INSIGHT agent that works with the object-centric representation provided by OC_Atari
+- ```--d```: if set, the container is executed in detached mode
 
-To train metadrive, use 
+If you want to change the games, reward functions, or training durations used, follow the breadcrumbs inside the file!
+
+### Run other scripts locally
+Generally, it is recommended to run these scripts from inside ```./cleanrl/```:
 ```bash
-bash scripts/train_policy_metadrive.sh
+cd cleanrl
 ```
-
-Here is a report for INSIGHT: 
-
-[Report](https://wandb.ai/liruiluo/nsrl-eql/reports/Pong--Vmlldzo4MzgxOTc3)
-
-
-# Citation
-
-If you find our code implementation helpful for your own research or work, please cite our paper.
-
-```bibtex
-@article{luo2024insight,
-  title={End-to-End Neuro-Symbolic Reinforcement Learning with Textual Explanations},
-  author={Luo, Lirui and Zhang, Guoxi and Xu, Hongming and Yang, Yaodong and Fang, Cong and Li, Qing},
-  journal={ICML},
-  year={2024}
-}
+If you want to pre-train the CNN for any specific game, run the following series of commands. You should be able to substitue any farama Atari [game-string](https://ale.farama.org/environments/), although we've only tested for ```*NoFrameskip-v4``` type environments:
+```bash
+python cnn/generate_dataset.py --game=PongNoFrameskip-v4
+python cnn/segment_video.py --game=PongNoFrameskip-v4
+python cnn/transform_data.py --game=PongNoFrameskip-v4
+python train/train_cnn_reorder.py --game=PongNoFrameskip-4
 ```
+If you want train an agent for different games or with different parameters individually using the end-to-end original approach, you can use (check the file for flag-options):
+```bash
+python train/train_policy_atari.py --game PongNoFrameskip-v4 --reward_function default
+```
+*Important:* To train for a game, you need to first run pre-training for this game!
 
-# Contact
+Alternatively, you can also train directly on OC_Atari object-centric representations of the environments. In this case, no pre-training is necessary although results will likely not be satisfactory in terms of EQL-agent performance:
+```bash
+python train/train_policy_ocatari.py --game PongNoFrameskip-v4 --reward_function default
+```
+A further experimental training script where the EQL-agent is trained after the neural agent has finished training can be run (without any guarantees!) using:
+```bash
+python train/train_then_distill_policy_hackatari.py
+```
+## Results
+Any agent training produces the following outputs, which can be navigated to via the run name (printed during training)
+- *Video recordings*: During and after training both the EQL-agent and the neural agent are recorded, which can be found in ```./cleanrl/ppoeql_ocatari_videos/RUNNAME/```
+- *EQL-equations*: After training the polynomials are extracted and stored in a text file which can be found at ```./cleanrl/equations/RUNNAME.txt```
+- *Trained agent*: The agents themseles (both the EQL and neural agent) are saved during training at ```./cleanrl/models/agents/RUNNAME_final.pth```
+## Object-detection benchmarking
+```bash
+# TODO Alex
+```
+## LLM evaluation
+One of the central aims of the project was to evaluate the validity and usefulness of their approach to explainability. The authors suggested that the equations extracted from their agent can be effectively verbalized/explained by an LLM. To test this claim, we retrained a Pong agent using several different reward functions and then asked the LLM to use the equations the infer the reward function this agent was optimized for. We also evaluated the regular Pong agent in OOD environments which we manipulated using HackAtari and asked the LLM to predict its performance and behavior using the provided policy. Prompts, results, equations, etc. for these experiments can be found [here](https://drive.google.com/drive/folders/1yi9JkR5QRicLOnu9eG90hjm6KU-g8Tse).
 
-For any queries, please [raise an issue](https://github.com/liruiluo/nsrl-vision-pub/issues/new) or
-contact [Qing Li](https://liqing-ustc.github.io/).
+## Contact
+For any questions regarding the CNN-pre-training or benchmarking, reach out to [Alexander Doll](https://github.com/alexanderdoll) and for any questions regarding the LLM evaluation or the agent training, reach out to [Max Schindler](https://github.com/maxschin/).
 
-# License
+## Acknowledgement
+We thank our supervisor [Quentin Delfosse](https://github.com/k4ntz/) for his guidance and encouragement!
 
+## License
 This project is open sourced under [MIT License](LICENSE).
