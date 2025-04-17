@@ -1,6 +1,6 @@
 import os
 import sys
-SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SRC = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(SRC)
 
 import re
@@ -33,11 +33,13 @@ def parse_args():
     parser.add_argument("--n_eval_episodes", type=int, default=30, help="Number of episodes that returns should be collected on")
     parser.add_argument("--n_record_steps", type=int, default=1000, help="Number of steps that should be taken per recording in environment")
     parser.add_argument("--seed", type=int, default=21, help="The seed to use for the eval envs")
+    # for debugging
+    parser.add_argument("--local_debugging", action="store_true", help="Radically shortens the training loop when running outside of container")
     return parser.parse_args()
 
 def load_checkpoints(run_names, device="cpu", use_e2e=True):
     checkpoint_list = []
-    ckpt_dir = os.path.abspath("models/agents")
+    ckpt_dir = os.path.join(SRC, "models", "agents")
     
     ending = f"_{"e2e" if use_e2e else "oc"}_final.pth"
     if run_names:
@@ -78,9 +80,10 @@ def main():
     if containerized:
         print("Running inside container")
     else:
-        args.n_envs_eval = 4
-        args.n_eval_episodes = 1
-        args.use_modifs = False
+        if args.local_debuggin:
+            args.n_envs_eval = 4
+            args.n_eval_episodes = 1
+            args.use_modifs = False
         print("Running locally")
 
     # get device and then load agent

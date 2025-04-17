@@ -577,7 +577,6 @@ if __name__ == "__main__":
     print("Saving equations...")
     var_names = get_object_order(args.game)
     output_names = envs.env_method("get_action_names", indices=[0])[0]
-    output_names = envs
     equations, _ = extract_equations(
         agent,
         var_names,

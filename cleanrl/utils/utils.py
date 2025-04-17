@@ -135,7 +135,7 @@ def eval_policy(envs, action_func, device="cuda", n_episode=10):
     return avg_return, avg_length
 
 def get_object_order(game):
-    folder = os.path.join(SRC, "batch_training" + game)
+    folder = os.path.join(SRC, "batch_training", game)
     file = os.path.join(folder, "object_order.json")
     with open(file, 'r') as f:
         data = json.load(f)
