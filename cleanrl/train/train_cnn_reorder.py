@@ -490,9 +490,9 @@ if __name__ == '__main__':
     test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
     if args.batch_process:
-        model = torch.load(args.model_path)
+        model = torch.load(args.model_path, weights_only=False)
     else:
-        model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl')
+        model = torch.load('models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl', weights_only=False)
 
     optm = Adam(model.parameters(), lr=args.lr)
     all_epoch = 1
