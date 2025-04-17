@@ -26,7 +26,7 @@ bash scripts/train_all_hackatari_original.sh
 python cleanrl/evaluate_trained_agents.py
 ```
 ### Run core script in container (recommended)
-This assumes that you have ```podman``` set up on your system. The relevant directories will be mounted such that results are saved locally.
+This assumes that you have ```podman``` set up on your system and, if you have an NVIDIA GPU, also that you have enabled CDI support. The relevant directories will be mounted such that results are saved locally.
 ```bash
 bash scripts/docker_pre_train.sh
 bash scripts/docker_run.sh --original --all
@@ -49,11 +49,11 @@ If you want to pre-train the CNN for any specific game, run the following series
 python cnn/generate_dataset.py --game=PongNoFrameskip-v4
 python cnn/segment_video.py --game=PongNoFrameskip-v4
 python cnn/transform_data.py --game=PongNoFrameskip-v4
-python train/train_cnn_reorder.py --game=PongNoFrameskip-4
+python train/train_cnn_reorder.py --game=PongNoFrameskip-v4
 ```
 If you want train an agent for different games or with different parameters individually using the end-to-end original approach, you can use (check the file for flag-options):
 ```bash
-python train/train_policy_atari.py --game PongNoFrameskip-v4 --reward_function default
+python train/train_policy_atari.py --game PongNoFrameskip-v4 --reward_function random_rf
 ```
 *Important:* To train for a game, you need to first run pre-training for this game!
 
