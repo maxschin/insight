@@ -59,7 +59,7 @@ python train/train_policy_atari.py --game PongNoFrameskip-v4 --reward_function r
 
 Alternatively, you can also train directly on OC_Atari object-centric representations of the environments. In this case, no pre-training is necessary although results will likely not be satisfactory in terms of EQL-agent performance:
 ```bash
-python train/train_policy_ocatari.py --game PongNoFrameskip-v4 --reward_function default
+python train/train_policy_ocatari.py --game PongNoFrameskip-v4 --reward_function random_rf
 ```
 A further experimental training script where the EQL-agent is trained after the neural agent has finished training can be run (without any guarantees!) using:
 ```bash
