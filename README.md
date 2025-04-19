@@ -12,7 +12,7 @@ pip install -U pip
 pip install -r requirements.txt
 pip install opencv-python-headless
 ```
-If you want to run the object detection with SAM-Track as the authors did in the original paper, you might also have to install the following dependencies:
+If you want to run the object detection with SAM-Track as the authors did in the original paper, you might also have to install Groundingdino as a dependency:
 ```bash
 pip install groundingdino-py
 ```
