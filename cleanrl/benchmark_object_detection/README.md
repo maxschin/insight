@@ -35,7 +35,7 @@ Run benchmark_object_detection.py with the following flags:
 Returns: intersection-over-union values, precision, recall, f1-score, coordinate-loss and shape-loss between the two sets of labels
 
 ### Models
-unter https://hessenbox.tu-darmstadt.de/getlink/fiYDKePrsyGZn77vbzVZozFL/models diesem Link können bereits trainierte CNNs für die object detection gefunden werden die Modelle müssen in den models folder eingefügt werden.
+Here (https://hessenbox.tu-darmstadt.de/getlink/fiYDKePrsyGZn77vbzVZozFL/models) you can find already trained CNNs for object detection. Place them into the models folder for further usage.
 
 ### Examples
 
