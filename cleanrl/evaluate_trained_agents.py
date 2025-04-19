@@ -41,7 +41,7 @@ def load_checkpoints(run_names, device="cpu", use_e2e=True):
     checkpoint_list = []
     ckpt_dir = os.path.join(SRC, "models", "agents")
     
-    ending = f"_{"e2e" if use_e2e else "oc"}_final.pth"
+    ending = f'_{"e2e" if use_e2e else "oc"}_final.pth'
     if run_names:
         filenames = [f"{name}{ending}" for name in run_names]
     else:
@@ -91,7 +91,7 @@ def main():
     if containerized:
         print("Running inside container")
     else:
-        if args.local_debuggin:
+        if args.local_debugging:
             args.n_envs_eval = 4
             args.n_eval_episodes = 1
             args.use_modifs = False
@@ -105,6 +105,7 @@ def main():
     args.resolution = 84
     args.threshold = 0.5
     args.gray = True
+    args.n_layers = 1
     
     # collect data
     final_datapoints = []
