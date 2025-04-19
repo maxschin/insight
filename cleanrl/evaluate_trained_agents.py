@@ -136,7 +136,7 @@ def main():
                 modif_list = [modif] if modif != "default" else []
 
                 # set up envs for evaluation and recording
-                envs = SubprocVecEnv([make_env(args.game, args.seed + i, modifs=modif_list, rewardfunc_path=rewardfunc_path, pix=True) for i in range(args.n_envs_eval)], start_method="fork")
+                envs = SubprocVecEnv([make_env(args.game, args.seed + i, modifs=modif_list, rewardfunc_path=rewardfunc_path, pix=True, args=args) for i in range(args.n_envs_eval)], start_method="fork")
 
                 # always record statistics for both types of agents
                 for agent_type in ["neural", "eql"]:
