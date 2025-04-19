@@ -12,10 +12,7 @@ pip install -U pip
 pip install -r requirements.txt
 pip install opencv-python-headless
 ```
-If you want to run the object detection with SAM-Track as the authors did in the original paper, you might also have to install the following dependencies:
-```bash
-# TODO ALEX
-```
+If you want to run the object detection with SAM-Track as the authors did in the original paper, you probably need to install GroundingDINO as explained on their GitHub Page (https://github.com/IDEA-Research/GroundingDINO).
 ## General usage
 You can run the core script to pre-train the CNN, train the end-to-end INSIGHT agents, and then evaluate them with different HackAtari modifications either locally or inside a container. As of now, this runs the script for Pong, SpaceInvaders, MsPacman, Seaquest, and Freeway. The selection of games can be configured inside```scripts/pre_train_cnn_all.sh``` and ```scripts/train_all_hackatari_original.sh```.
 
@@ -59,7 +56,7 @@ python train/train_policy_atari.py --game PongNoFrameskip-v4 --reward_function r
 
 Alternatively, you can also train directly on OC_Atari object-centric representations of the environments. In this case, no pre-training is necessary although results will likely not be satisfactory in terms of EQL-agent performance:
 ```bash
-python train/train_policy_ocatari.py --game PongNoFrameskip-v4 --reward_function default
+python train/train_policy_ocatari.py --game PongNoFrameskip-v4 --reward_function random_rf
 ```
 A further experimental training script where the EQL-agent is trained after the neural agent has finished training can be run (without any guarantees!) using:
 ```bash
@@ -70,10 +67,10 @@ Any agent training produces the following outputs, which can be navigated to via
 - *Video recordings*: During and after training both the EQL-agent and the neural agent are recorded, which can be found in ```./cleanrl/ppoeql_ocatari_videos/RUNNAME/```
 - *EQL-equations*: After training the polynomials are extracted and stored in a text file which can be found at ```./cleanrl/equations/RUNNAME.txt```
 - *Trained agent*: The agents themseles (both the EQL and neural agent) are saved during training at ```./cleanrl/models/agents/RUNNAME_final.pth```
+
 ## Object-detection benchmarking
-```bash
-# TODO Alex
-```
+An explanation of how the benchmarking of the object detection works, can be found in the README in `cleanrl/benchmark_object_detection`
+
 ## LLM evaluation
 One of the central aims of the project was to evaluate the validity and usefulness of their approach to explainability. The authors suggested that the equations extracted from their agent can be effectively verbalized/explained by an LLM. To test this claim, we retrained a Pong agent using several different reward functions and then asked the LLM to use the equations the infer the reward function this agent was optimized for. We also evaluated the regular Pong agent in OOD environments which we manipulated using HackAtari and asked the LLM to predict its performance and behavior using the provided policy. Prompts, results, equations, etc. for these experiments can be found [here](https://drive.google.com/drive/folders/1yi9JkR5QRicLOnu9eG90hjm6KU-g8Tse).
 
