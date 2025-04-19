@@ -53,7 +53,18 @@ def load_checkpoints(run_names, device="cpu", use_e2e=True):
         path = os.path.join(ckpt_dir, filename)
         if os.path.exists(path):
             agent = torch.load(path, weights_only=False, map_location=device)
-            match = re.match(r"^(?P<game>.*?)_Agent(?:_(?P<reward_function>.*?))?_final\.pth$", filename)
+            pattern = re.compile(
+                r'^'
+                r'(?P<game>.+?)'                # 1. game name, non‑greedy
+                r'_Agent'
+                r'(?:_(?P<reward_function>'     # 2. optional reward_function
+                  r'(?!e2e|oc).+?'              #    — but not “e2e” or “oc”
+                r'))?'
+                r'(?:_(?:e2e|oc))?'             # 3. optional suffix “_e2e” or “_oc”
+                r'_final\.pth'
+                r'$'
+            )
+            match = re.match(pattern, filename)
             game = match.group("game")
             reward_function = match.group("reward_function")
             reward_function = reward_function if reward_function else "default"
