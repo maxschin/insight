@@ -12,10 +12,7 @@ pip install -U pip
 pip install -r requirements.txt
 pip install opencv-python-headless
 ```
-If you want to run the object detection with SAM-Track as the authors did in the original paper, you might also have to install Groundingdino as a dependency:
-```bash
-pip install groundingdino-py
-```
+If you want to run the object detection with SAM-Track as the authors did in the original paper, you probably need to install GroundingDINO as explained on their GitHub Page (https://github.com/IDEA-Research/GroundingDINO).
 ## General usage
 You can run the core script to pre-train the CNN, train the end-to-end INSIGHT agents, and then evaluate them with different HackAtari modifications either locally or inside a container. As of now, this runs the script for Pong, SpaceInvaders, MsPacman, Seaquest, and Freeway. The selection of games can be configured inside```scripts/pre_train_cnn_all.sh``` and ```scripts/train_all_hackatari_original.sh```.
 
