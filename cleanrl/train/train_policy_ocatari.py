@@ -174,7 +174,7 @@ if __name__ == "__main__":
     os.makedirs(equations_folder, exist_ok=True)
     # model checkpoints
     os.makedirs(os.path.join(SRC, "models/agents"), exist_ok=True)
-    ckpt_dir = os.path.abspath(os.path.join(SRC, "models/agents"))
+    ckpt_dir = os.path.abspath(os.path.join(SRC, "models", "agents"))
 
     # tensorboard logs
     tensorboard_log_dir = os.path.join(SRC, f"runs/{run_name}")
@@ -194,6 +194,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Setup multiple OCAtari environments
+    print("Setting up envs....")
     rewardfunc_path = get_reward_func_path(args.game, args.reward_function) if args.reward_function else None
     envs = SubprocVecEnv(
         [make_env(args.game, args.seed + i, modifs=args.modifs, rewardfunc_path=rewardfunc_path) for i in range(args.num_envs)], start_method="fork")
@@ -204,6 +205,7 @@ if __name__ == "__main__":
     agent_in_dim = envs.env_method("get_ns_out_dim", indices=[0])[0]
 
     # instatintiate agent
+    print("Instantiating agent...")
     agent_class = load_agent(args.agent_type, for_sb3=False)
     num_actions = envs.action_space.n
     agent = agent_class(args, agent_in_dim=agent_in_dim, skip_perception=True, n_actions=num_actions).to(device)
@@ -213,6 +215,7 @@ if __name__ == "__main__":
          {'params':agent.critic.parameters(),'lr':args.learning_rate},
          {'params':agent.network.parameters(),'lr':args.learning_rate},
          {'params':agent.eql_actor.parameters(),'lr':args.learning_rate * 2}], eps=1e-5)
+    print("Done instantiating agent")
 
     regularization = L12Smooth()
     loss_distill = CrossEntropyLoss()
@@ -232,6 +235,10 @@ if __name__ == "__main__":
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
+
+    action_func = lambda t: agent.get_action_and_value(t, threshold=args.threshold, actor="neural")[0]
+    neural_returns, neural_lengths = eval_policy(
+        envs_eval, action_func, device=device)
 
     # also do rtpt tracking
     rtpt = RTPT(name_initials="MS", experiment_name="INSIGHT", max_iterations=num_updates)
@@ -306,21 +313,20 @@ if __name__ == "__main__":
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
-                if "final_info" in info:
-                    episode_return = 0.
-                    episode_length = 0.
-                    n_episode = 0 
-                    for env_id, env_info in enumerate(info["final_info"]):
-                        if not env_info is None:
-                            if "episode" in env_info:
-                                episode_return += env_info["episode"]["r"]
-                                episode_length += env_info["episode"]["l"]
-                                n_episode += 1.
-                    if n_episode > 0:
-                        episode_return /= n_episode
-                        episode_length /= n_episode
-                        writer.add_scalar("charts/episodic_return", episode_return, global_step)
-                        writer.add_scalar("charts/episodic_length", episode_length, global_step)
+                if np.any(done):
+                    total_return = 0 
+                    total_length = 0
+                    total_episodes = 0
+                    done_indices = np.nonzero(done)[0]
+                    episode_returns = np.array([info[i]["episode"]["r"] for i in done_indices])
+                    episode_lengths = np.array([info[i]["episode"]["l"] for i in done_indices])
+                    total_return += episode_returns.sum()
+                    total_length += episode_lengths.sum()
+                    total_episodes += len(done_indices)
+                    avg_return = total_return / total_episodes
+                    avg_length = total_length / total_episodes
+                    writer.add_scalar("charts/episodic_return", avg_return, global_step)
+                    writer.add_scalar("charts/episodic_length", avg_length, global_step)
 
             # bootstrap value if not done
             with torch.no_grad():

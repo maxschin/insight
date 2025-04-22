@@ -91,7 +91,6 @@ def make_env(env_name, seed,rewardfunc_path, modifs=[], sb3=False, pix=False, ar
             frameskip=1,
             obs_mode="ori" if pix else "obj"
         )
-        env = Monitor(env)
         if not sb3:
             env = NoopResetEnv(env, noop_max=30) 
             env = MaxAndSkipEnv(env, skip=4)
@@ -104,6 +103,7 @@ def make_env(env_name, seed,rewardfunc_path, modifs=[], sb3=False, pix=False, ar
                 if args.gray:
                     env = gym.wrappers.GrayscaleObservation(env)
                 env = gym.wrappers.FrameStackObservation(env, 4)
+        env = Monitor(env)
         env.reset(seed=seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)

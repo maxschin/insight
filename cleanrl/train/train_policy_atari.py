@@ -208,9 +208,7 @@ if __name__ == "__main__":
         print("Running locally")
 
     ##sam_track_data:
-    print("Loading CNN test data...")
-    import warnings
-    warnings.warn("Location is hardcoded, needs to be updated for other games than Pong!")
+    print("Loading CNN train/test data...")
 
     asset_dir = os.path.join(SRC, "batch_training", args.game)
     images_dir = os.path.join(asset_dir, "train_frames")
@@ -224,7 +222,7 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=args.minibatch_size,num_workers=2)
     train_data = itertools.cycle(train_loader)
     test_data = iter(test_loader)
-    print("Finished loading CNN test data...")
+    print("Finished loading CNN train/test data...")
 
 
     # TRY NOT TO MODIFY: seeding
@@ -256,15 +254,15 @@ if __name__ == "__main__":
     if args.pre_nn_agent:
         if args.pnn_guide:
             print('pnn_guide')
-            agent_nn = torch.load(os.path.join(SRC, 'models/agents/'+f"{args.env_id}"+f'_{args.obj_vec_length}'+"_NN"+"_gray"*args.gray+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'.pth')).to(device)
+            agent_nn = torch.load(os.path.join(SRC, 'models', "agents", f"{args.env_id}"+f'_{args.obj_vec_length}'+"_NN"+"_gray"*args.gray+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'.pth')).to(device)
         else:
-            agent_nn = torch.load(os.path.join(SRC, 'models/agents/'+f"{args.env_id}"+f'_{args.obj_vec_length}'+f"_gray{args.gray}"+f"_t{args.total_timesteps}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'.pth')).to(device)
+            agent_nn = torch.load(os.path.join(SRC, "models", "agents", f"{args.env_id}"+f'_{args.obj_vec_length}'+f"_gray{args.gray}"+f"_t{args.total_timesteps}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'.pth')).to(device)
             print('nn_guide')
         agent = Agent(args,nnagent=agent_nn, n_actions=n_actions, n_funcs=n_funcs, device=device).to(device)
         for param in agent_nn.parameters():
             param.requires_grad = False
         if args.cover_cnn:
-            agent.network = torch.load(os.path.join(SRC, 'models/'+f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl'))
+            agent.network = torch.load(os.path.join(SRC, 'models', f'{args.env_id}'+f'{args.resolution}'+f'{args.obj_vec_length}'+f"_gray{args.gray}"+f"_objs{args.n_objects}"+f"_seed{args.seed}"+'_od.pkl'))
     else:
         agent = Agent(args, n_funcs=n_funcs, n_actions=n_actions, device=device).to(device)
 
@@ -320,10 +318,10 @@ if __name__ == "__main__":
     equations_folder = os.path.join(SRC, "equations")
     os.makedirs(equations_folder, exist_ok=True)
     # model checkpoints
-    os.makedirs(os.path.join(SRC, "models/agents"), exist_ok=True)
-    ckpt_dir = os.path.abspath(os.path.join(SRC, "models/agents"))
+    os.makedirs(os.path.join(SRC, "models", "agents"), exist_ok=True)
+    ckpt_dir = os.path.abspath(os.path.join(SRC, "models", "agents"))
     # tensorboard logs
-    tensorboard_log_dir = os.path.join(SRC, f"runs/{run_name}")
+    tensorboard_log_dir = os.path.join(SRC, "runs", run_name)
     os.makedirs(tensorboard_log_dir, exist_ok=True)
 
     # set up tensor board logging
@@ -411,21 +409,20 @@ if __name__ == "__main__":
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
-                if "final_info" in info:
-                    episode_return = 0.
-                    episode_length = 0.
-                    n_episode = 0 
-                    for env_id, env_info in enumerate(info["final_info"]):
-                        if not env_info is None:
-                            if "episode" in env_info:
-                                episode_return += env_info["episode"]["r"]
-                                episode_length += env_info["episode"]["l"]
-                                n_episode += 1.
-                    if n_episode > 0:
-                        episode_return /= n_episode
-                        episode_length /= n_episode
-                        writer.add_scalar("charts/episodic_return", episode_return, global_step)
-                        writer.add_scalar("charts/episodic_length", episode_length, global_step)
+                if np.any(done):
+                    total_return = 0 
+                    total_length = 0
+                    total_episodes = 0
+                    done_indices = np.nonzero(done)[0]
+                    episode_returns = np.array([info[i]["episode"]["r"] for i in done_indices])
+                    episode_lengths = np.array([info[i]["episode"]["l"] for i in done_indices])
+                    total_return += episode_returns.sum()
+                    total_length += episode_lengths.sum()
+                    total_episodes += len(done_indices)
+                    avg_return = total_return / total_episodes
+                    avg_length = total_length / total_episodes
+                    writer.add_scalar("charts/episodic_return", avg_return, global_step)
+                    writer.add_scalar("charts/episodic_length", avg_length, global_step)
 
             # bootstrap value if not done
             with torch.no_grad():
