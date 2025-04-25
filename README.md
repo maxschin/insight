@@ -14,19 +14,21 @@ pip install opencv-python-headless
 ```
 If you want to run the object detection with SAM-Track as the authors did in the original paper, you probably need to install GroundingDINO as explained on their GitHub Page (https://github.com/IDEA-Research/GroundingDINO).
 ## General usage
-You can run the core script to pre-train the CNN, train the end-to-end INSIGHT agents, and then evaluate them with different HackAtari modifications either locally or inside a container. As of now, this runs the script for Pong, SpaceInvaders, MsPacman, Seaquest, and Freeway. The selection of games can be configured inside```scripts/pre_train_cnn_all.sh``` and ```scripts/train_all_hackatari_original.sh```.
+You can run the core script to pre-train the CNN, train the end-to-end INSIGHT agents, and then evaluate them with different HackAtari modifications either locally or inside a container. As of now, this runs the script for PongNoFrameskip-v4, SpaceInvadersNoFrameskip-v4, MsPacmanNoFrameskip-v4, SeaquestNoFrameskip-v4, and FreewayNoFrameskip-v4. The selection of games can be configured inside```scripts/pre_train_cnn_all.sh``` and ```scripts/train_all_hackatari_original.sh```.
+*Important:* Due to versioning difficulities for the dependencies required for pre-training, we supply pre-trained CNNs that can be downloaded [here](https://next.hessenbox.de/index.php/s/6YSPtinjJHPp6nz). Transfer the contents of ```batch_training``` into the local folder ```cleanrl/batch_training``` and the entire pre-training can be skipped, at least for the configured games, as mentioned before.
+*Also Important:* At the same location we also provided fully trained INSIGHT agents for the configured games. For this, you need to transfer the contents of ```models``` into ```cleanrl/models``` and can then proceed to evaluation.
 
 ### Run core script locally
 ```bash
-bash scripts/pre_train_cnn_all.sh
-bash scripts/train_all_hackatari_original.sh
+bash scripts/pre_train_cnn_all.sh # not recommended, see above
+bash scripts/train_all_hackatari_original.sh # not necessary, see above
 python cleanrl/evaluate_trained_agents.py
 ```
 ### Run core script in container (recommended)
 This assumes that you have ```podman``` set up on your system and, if you have an NVIDIA GPU, also that you have enabled CDI support. The relevant directories will be mounted such that results are saved locally.
 ```bash
-bash scripts/docker_pre_train.sh
-bash scripts/docker_run.sh --original --all
+bash scripts/docker_pre_train.sh # not recommended, see above
+bash scripts/docker_run.sh --original --all # not necessary, see above
 bash scripts/docker_eval.sh
 ```
 A few notes on the flags of the ```scripts/docker_run.sh``` file:
@@ -42,8 +44,9 @@ Generally, it is recommended to run these scripts from inside ```./cleanrl/```:
 cd cleanrl
 ```
 If you want to pre-train the CNN for any specific game, run the following series of commands. You should be able to substitue any farama Atari [game-string](https://ale.farama.org/environments/), although we've only tested for ```*NoFrameskip-v4``` type environments:
+*Important:* As per the note at the top of [general usage](#general-usage), we supply pre-trained CNNs. We also supply intermediate outputs for the individual pre-training steps so while you shouldn't run ```cnn/generate_dataset.py``` you can run the other pre-training steps.
 ```bash
-python cnn/generate_dataset.py --game=PongNoFrameskip-v4
+python cnn/generate_dataset.py --game=PongNoFrameskip-v4 # not recommended, see above
 python cnn/segment_video.py --game=PongNoFrameskip-v4
 python cnn/transform_data.py --game=PongNoFrameskip-v4
 python train/train_cnn_reorder.py --game=PongNoFrameskip-v4
